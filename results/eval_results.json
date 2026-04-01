@@ -1,0 +1,57 @@
+[
+  {
+    "experiment": "Qwen2.5-base",
+    "model_path": "Qwen/Qwen2.5-1.5B",
+    "avg_accuracy": 12.5,
+    "gsm8k_accuracy": 5.0,
+    "gsm8k_correct": 10,
+    "gsm8k_total": 200,
+    "math_accuracy": 20.0,
+    "math_correct": 20,
+    "math_total": 100
+  },
+  {
+    "experiment": "CT",
+    "model_path": "/home/skim253/slm_vcl/results/models/ct_final",
+    "avg_accuracy": 39.5,
+    "gsm8k_accuracy": 60.0,
+    "gsm8k_correct": 120,
+    "gsm8k_total": 200,
+    "math_accuracy": 19.0,
+    "math_correct": 19,
+    "math_total": 100
+  },
+  {
+    "experiment": "Ours-B",
+    "model_path": "/home/skim253/slm_vcl/results/models/ours_b_symbolic_final",
+    "avg_accuracy": 41.25,
+    "gsm8k_accuracy": 61.5,
+    "gsm8k_correct": 123,
+    "gsm8k_total": 200,
+    "math_accuracy": 21.0,
+    "math_correct": 21,
+    "math_total": 100
+  },
+  {
+    "experiment": "Ours-A",
+    "model_path": "/home/skim253/slm_vcl/results/models/ours_a_entropy_gap_final",
+    "avg_accuracy": 42.25,
+    "gsm8k_accuracy": 63.5,
+    "gsm8k_correct": 127,
+    "gsm8k_total": 200,
+    "math_accuracy": 21.0,
+    "math_correct": 21,
+    "math_total": 100
+  },
+  {
+    "experiment": "RHO-1",
+    "model_path": "/home/skim253/slm_vcl/results/models/rho1_final",
+    "avg_accuracy": 39.0,
+    "gsm8k_accuracy": 56.99999999999999,
+    "gsm8k_correct": 114,
+    "gsm8k_total": 200,
+    "math_accuracy": 21.0,
+    "math_correct": 21,
+    "math_total": 100
+  }
+]

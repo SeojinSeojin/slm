@@ -6,13 +6,10 @@
 #   → training model loss - reference model loss
 #   → 이 값이 높은 토큰 = "아직 배울 게 많은 토큰" → 선택
 #
-# 개선사항:
-#   1. Reference model을 TinyLlama로 교체
-#      → Qwen2.5-Math와 Qwen2.5-base는 너무 유사해서 excess loss 차이 거의 없음
-#      → TinyLlama는 완전히 다른 모델이라 차별화 뚜렷
-#   2. 포맷 토큰 강제 포함
-#      → "Question:", "Answer:" 같은 Q&A 구조 토큰은 무조건 mask=True
-#      → 이 토큰들이 마스킹되면 생성 패턴 학습 불가
+# Implementation notes:
+#   - Reference model: Qwen2.5-0.5B (same tokenizer family, no vocab mismatch)
+#   - Offline pre-scoring (paper uses dynamic per-batch recomputation)
+#   - No format token forced inclusion (paper does not specify this)
 
 import json
 import torch
@@ -23,19 +20,7 @@ from tqdm import tqdm
 import os
 
 TRAINING_MODEL_NAME  = "Qwen/Qwen2.5-1.5B"
-REFERENCE_MODEL_NAME = "TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T"  # 개선: 충분히 다른 모델
-
-# Q&A 포맷 토큰 — 무조건 포함 (마스킹하면 생성 패턴 학습 불가)
-FORMAT_KEYWORDS = {
-    "question", "answer", "solution", "problem",
-    "Q", "A", ":", "\n",
-}
-
-
-def is_format_token(token_str: str) -> bool:
-    """Q&A 구조 토큰이면 True — 무조건 학습에 포함."""
-    t = token_str.strip().lower()
-    return t in FORMAT_KEYWORDS or token_str.strip() in {":", "\n", "##"}
+REFERENCE_MODEL_NAME = "Qwen/Qwen2.5-0.5B"  # Same tokenizer family, no vocab mismatch
 
 
 @torch.no_grad()
@@ -114,16 +99,12 @@ class RHO1Scorer:
     def score(
         self,
         text:         str,
-        select_ratio: float = 0.77,
+        select_ratio: float = 0.60,
         max_length:   int   = 512,
     ) -> dict:
         """
-        논문 Eq.3: excess loss = L_training(x_i) - L_reference(x_i)
-
-        개선:
-        1. 포맷 토큰("Question:", "Answer:" 등)은 무조건 mask=True
-           → 이 토큰 마스킹 시 Q&A 패턴 학습 불가
-        2. 나머지 토큰은 excess loss 상위 k%로 선택
+        Eq.3: excess loss = L_training(x_i) - L_reference(x_i)
+        Select top select_ratio% by excess loss.
         """
         enc = self.tokenizer(
             text, max_length=max_length, truncation=True, return_tensors="pt"
@@ -142,20 +123,11 @@ class RHO1Scorer:
 
         excess = loss_t - loss_r
 
-        # 포맷 토큰 판별
+        # Select top select_ratio% by excess loss
         token_ids_list = token_ids[0, :min_len].tolist()
-        format_mask = np.array([
-            is_format_token(self.tokenizer.decode([tid]))
-            for tid in token_ids_list
-        ], dtype=bool)
-
-        # excess loss 기준 상위 k% 선택 (포맷 토큰 제외하고 계산)
         n_select  = max(1, int(min_len * select_ratio))
         threshold = np.sort(excess)[-n_select]
-        excess_mask = excess >= threshold
-
-        # 최종 mask: 포맷 토큰 OR excess loss 상위 k%
-        mask = (format_mask | excess_mask).tolist()
+        mask      = (excess >= threshold).tolist()
 
         return {
             "token_ids":   token_ids_list,
@@ -169,7 +141,7 @@ def preprocess_dataset_rho1(
     output_path:          str,
     training_model_name:  str   = TRAINING_MODEL_NAME,
     reference_model_name: str   = REFERENCE_MODEL_NAME,
-    select_ratio:         float = 0.77,
+    select_ratio:         float = 0.60,
     max_length:           int   = 512,
 ):
     """JSONL 전체에 RHO-1 스코어링 적용."""
@@ -224,7 +196,7 @@ if __name__ == "__main__":
     # 단일 문서 테스트
     scorer = RHO1Scorer()
     text   = "A boxer weighs 97 kg at 4 months from a fight. He loses 3 kg per month. How much will he weigh?"
-    result = scorer.score(text, select_ratio=0.77)
+    result = scorer.score(text, select_ratio=0.60)
 
     tokenizer = AutoTokenizer.from_pretrained(TRAINING_MODEL_NAME)
     print("\n=== RHO-1 선택 토큰 ===")

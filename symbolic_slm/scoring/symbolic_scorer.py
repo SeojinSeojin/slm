@@ -88,6 +88,11 @@ def is_symbolic_token(token_str: str) -> bool:
     return False
 
 
+def is_answer_separator(token_str: str) -> bool:
+    """Force-include #### tokens — answer separator must always be learned."""
+    return token_str.strip().startswith("####") or token_str.strip() == "##"
+
+
 def score_tokens_symbolic(
     token_ids:    list,
     tokenizer:    AutoTokenizer,

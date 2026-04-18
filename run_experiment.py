@@ -41,12 +41,16 @@ CONFIG = {
     "select_ratio_rho1": 0.77,
 
     "gsm8k_samples":     200,
-    "math_samples":      100,
+    "math_samples":      200,
+    "asdiv_samples":     200,
+    "svamp_samples":     200,
 
     "run_ct":     False,
     "run_rho1":   True,
-    "run_ours_b": False,
-    "run_ours_a": False,
+    "run_ours_b": True,
+    "run_ours_a": True,
+    "run_ours_c": True,
+    "run_base":   False,
 }
 
 print("=" * 60)
@@ -152,6 +156,8 @@ def train_eval_delete(experiment_name, scored_path, display_name, ct_mode=False)
             model_path, display_name, results_path,
             gsm8k_samples=CONFIG["gsm8k_samples"],
             math_samples=CONFIG["math_samples"],
+            asdiv_samples=CONFIG["asdiv_samples"],
+            svamp_samples=CONFIG["svamp_samples"],
         )
     except Exception as e:
         print(f"\n❌ [{display_name}] 평가 실패: {e}")
@@ -250,6 +256,17 @@ if CONFIG["run_ours_a"] and need_scoring(a_scored_path):
     )
     clear_memory()
 
+c_scored_path = os.path.join(DATA_DIR, "gsm8k_scored_math_confidence.jsonl")
+if CONFIG["run_ours_c"] and need_scoring(c_scored_path):
+    clear_memory()
+    from symbolic_slm.scoring.math_confidence_scorer import preprocess_dataset_math_confidence
+    preprocess_dataset_math_confidence(
+        data_path=raw_path, output_path=c_scored_path,
+        gap_ratio=0.40, abs_ratio=0.40, context_window=3,
+        max_length=CONFIG["max_length"],
+    )
+    clear_memory()
+
 print("\n✅ 스코어링 완료. 학습 시작.")
 
 
@@ -260,12 +277,14 @@ print("\n✅ 스코어링 완료. 학습 시작.")
 from symbolic_slm.eval.evaluate import run_evaluation
 
 # Base 평가
-if not already_evaluated("Qwen2.5-base"):
+if CONFIG["run_base"] and not already_evaluated("Qwen2.5-base"):
     clear_memory()
     run_evaluation(
         CONFIG["base_model"], "Qwen2.5-base", results_path,
         gsm8k_samples=CONFIG["gsm8k_samples"],
         math_samples=CONFIG["math_samples"],
+        asdiv_samples=CONFIG["asdiv_samples"],
+        svamp_samples=CONFIG["svamp_samples"],
     )
 
 # CT
@@ -289,6 +308,10 @@ if CONFIG["run_ours_b"]:
 # Ours-A
 if CONFIG["run_ours_a"]:
     train_eval_delete("ours_a_entropy_gap", a_scored_path, "Ours-A")
+
+# Ours-C
+if CONFIG["run_ours_c"]:
+    train_eval_delete("ours_c_math_confidence", c_scored_path, "Ours-C")
 
 print(f"\n실험 완료!")
 print(f"결과: {results_path}")

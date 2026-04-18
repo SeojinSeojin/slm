@@ -10,7 +10,7 @@
 # ============================================================
 # ★ 여기만 수정 ★
 # ============================================================
-DROPBOX_TOKEN="sl.u.AGYmtB1VQfMR20EcxpobAJO-RZLDeXV2X7strUtZuu1VH7_swF8vNAzZ27RNdJlSr1nzuhoNzNYm3BK82kZCxduoSXvhnplWBrSrFVkZDGLr0GaV1VxxCwQ4M5BHDFGdoOa1zjJaiN5N-GjxNsEUKZF-NPOc-2dZXUAq6Eh_jMpZJX67I2kNzIudi-bfzmZ_hKxGPid3MZ36GiyTf2gfnmVE41MQdjpK8Jl8fmMml6jZcTwwZbUj8lLf97V0ZGTT3sWXeNSlbYV07GrCedxY7Shn2GvTaahhDMGitVMd2AabmuGmBsvIOLKlz-Zc526mz27agpxTTNe9oXnewQNLi-4ifsWTKKQSzLq5V-gZbCCGMMMaOt6402pujf-Qv1mBWjacNLDOYuA_zaMKDi5gGfYVE-hCazbaDRVEqOWePTA6xp72iRKAKVog3ZiYhJvOh-JYPkEL561ItbTBZJqG8gKYMf9aE6QUniE6QP-a5zgASA71YW-ZBcL6t20bA76Dqiu3MJs3eugl8cNANmwolizpRPpx4-6mGNipuRMDnn4EF7c19uyZsuxQxcrnyZFcjCQ7l1Kqzn7NfLlwQgDdaV8MME4W6O5dqL9yi6VnrOtdhwGsanKrXb6siP9lOixnOQoDSqhUwtPuzhesRCnk0y_rk8z0d3gEAY2mM9ndiN09VF7wj4iEKngvu9WzFRhMRaO7Wax3MfFEUFZLH6uOeTCwd_CaVGh2TrOJ8TEWMHT7mAo4ErBb0TRqn8aoFovAKkosuzATFygCxlsWP6qN83LYWEUhNDuI8797-J-sjYE8n-eWuwHZYyVyFO4y98mtHPuxgIIbFKQfvFcCWWG_NvCq_9VSLyVOXnl8bu5avLdcnqaHOxSYNWV1wpzAGDLBbroVcyl3vD1WmMhOwEsKb8uyl5gWCwbiL6nrtm5caOsrhFavyJ-uG_T33NZ5L-0pRGDdVz_MlSKLFVn1Rgj6zkj5rlFZKJei-t0f-1Xna1zwiW28gEXUy1tdLY9I6c9zYNe3n0hpEDzW1CWuNyPzjzCP6fBsVLr3aqi9UeYl9WYeh0EMKIQHk0Nuk_vaBvaIkD3WNx3ZqnITtO9sAY_rODzhplEMWDXsRelOwvQ0YFpTzgKrIwOfIXxRZYD0RGbkB6rQfvshW1pqRjwSafpYsCt2bDtWlwZ3lV50rribPNkGuohlHoM1mjdtvlZc1THPXqYTx2dCkmdgXXfBPmhmWXn6dcYtOg80OhvrUJv5DtcOAf7h8UIQOIF7WQf_-H_WVLk7cUxitCtSInTU2T2HXBDeEaDngDBxPOr5uE3fF2Ar-A"
+DROPBOX_TOKEN="your_dropbox_token_here"
 DROPBOX_DEST="/slm_results"
 # ============================================================
 
@@ -53,11 +53,11 @@ echo ""
 echo "[2/4] Python 패키지 설치..."
 
 # Ubuntu 22 + 2080 Ti → CUDA 11.x 계열
-pip install --break-system-packages -q \
+pip install -q \
     torch torchvision torchaudio \
     --index-url https://download.pytorch.org/whl/cu118
 
-pip install --break-system-packages -q \
+pip install -q \
     "transformers>=4.40.0" \
     datasets \
     accelerate \

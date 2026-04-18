@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-# run_rho1_only.py
 import os, sys, json, gc, shutil, torch
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
-os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 
 SAVE_DIR  = os.path.join(BASE_DIR, "results")
 DATA_DIR  = os.path.join(SAVE_DIR, "data")
@@ -15,8 +14,8 @@ os.makedirs(MODEL_DIR, exist_ok=True)
 CONFIG = {
     "base_model":        "Qwen/Qwen2.5-1.5B",
     "max_steps":         8000,
-    "batch_size":        4,
-    "grad_accum_steps":  8,
+    "batch_size":        1,
+    "grad_accum_steps":  32,
     "learning_rate":     5e-5,
     "warmup_steps":      25,
     "max_length":        512,

@@ -8,7 +8,7 @@
 # Phase 1-A: Greedy filter 500 correct samples + counterfactual perturbation → ground-truth masks
 # Phase 1-B: Brief fine-tune on those masks → M_cft
 # Phase 2:   P_cft - P_base probability gap → top 15% critical for all remaining samples
-# Merge:     Phase 1 + Phase 2 → cft_masks_final.jsonl
+# Merge:     Phase 1 + Phase 2 → expand_mask → cft_masks_final.jsonl
 #
 # Usage:
 #   python cft_scorer.py --data gsm8k_train.jsonl
@@ -29,6 +29,8 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from tqdm import tqdm
 from typing import List, Dict, Optional, Tuple, Any
 
+from scoring.context_expansion import expand_mask
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Constants
 # ──────────────────────────────────────────────────────────────────────────────
@@ -38,7 +40,7 @@ TARGET_SAMPLES   = 500
 TOPK             = 3
 MAX_NEW_TOKENS   = 512
 SUFFIX_EXTRA     = 20
-CRITICAL_RATIO   = 0.15   # top 15% → critical
+CRITICAL_RATIO   = 0.15
 FINETUNE_STEPS   = 75
 LEARNING_RATE    = 2e-5
 BATCH_SIZE       = 2
@@ -52,13 +54,10 @@ FORMAT_STRINGS = {"Question:", "Answer:", "\n", " "}
 # Utilities
 # ══════════════════════════════════════════════════════════════════════════════
 
-# ── Answer extraction ─────────────────────────────────────────────────────────
-
 _ANSWER_RE = re.compile(r"####\s*([\d,\.\-]+)")
 
 
 def extract_answer(text: str) -> Optional[float]:
-    """Parse '#### <number>' from GSM8K-style generation. Returns float or None."""
     if not text:
         return None
     m = _ANSWER_RE.search(text)
@@ -67,7 +66,6 @@ def extract_answer(text: str) -> Optional[float]:
             return float(m.group(1).replace(",", "").strip())
         except ValueError:
             return None
-    # Fallback: last number in text
     nums = re.findall(r"-?\d[\d,]*(?:\.\d+)?", text)
     if nums:
         try:
@@ -77,10 +75,7 @@ def extract_answer(text: str) -> Optional[float]:
     return None
 
 
-# ── Mask I/O ──────────────────────────────────────────────────────────────────
-
 def save_masks(records: List[Dict[str, Any]], path: str) -> None:
-    """Write mask records to JSONL. Field order matches existing scorer interface."""
     with open(path, "w") as f:
         for r in records:
             out = {
@@ -100,8 +95,6 @@ def load_masks(path: str) -> List[Dict[str, Any]]:
     with open(path) as f:
         return [json.loads(l) for l in f if l.strip()]
 
-
-# ── Shared helpers ────────────────────────────────────────────────────────────
 
 def build_prompt(question: str) -> str:
     return f"Question: {question}\nAnswer:"
@@ -128,7 +121,6 @@ def greedy_generate(
     prompt: str,
     device: str,
 ) -> Tuple[str, List[int]]:
-    """Returns (response_text, response_token_ids)."""
     enc = tokenizer(prompt, return_tensors="pt").to(device)
     prompt_len = enc["input_ids"].shape[1]
     out = model.generate(
@@ -145,14 +137,13 @@ def greedy_generate(
 @torch.no_grad()
 def get_topk_at_each_position(
     model: AutoModelForCausalLM,
-    full_ids: torch.Tensor,   # [1, seq_len]
+    full_ids: torch.Tensor,
     prompt_len: int,
     device: str,
 ) -> torch.Tensor:
-    """Top-K token IDs at each response position. Shape: [resp_len, TOPK]."""
-    logits = model(full_ids.to(device)).logits[0]          # [seq_len, vocab]
-    resp_logits = logits[prompt_len - 1 : -1]              # [resp_len, vocab]
-    return resp_logits.topk(TOPK, dim=-1).indices.cpu()    # [resp_len, TOPK]
+    logits      = model(full_ids.to(device)).logits[0]
+    resp_logits = logits[prompt_len - 1 : -1]
+    return resp_logits.topk(TOPK, dim=-1).indices.cpu()
 
 
 @torch.no_grad()
@@ -166,11 +157,6 @@ def run_counterfactual_batch(
     gold_answer: float,
     device: str,
 ) -> List[int]:
-    """
-    For a given alternative rank (1 or 2), batch all positions together:
-    prefix_i = prompt + resp[:i] + alt_token_i
-    Decode each suffix, check answer. Returns F_j list (0 or 1) per position.
-    """
     resp_len = len(resp_ids)
     pad_id   = tokenizer.pad_token_id or tokenizer.eos_token_id
 
@@ -211,11 +197,6 @@ def annotate_one_sample(
     gold_answer: float,
     device: str,
 ) -> Tuple[List[int], List[int]]:
-    """
-    Returns (all_token_ids, critical_mask) for prompt + response.
-    Prompt tokens → always 1. Format tokens → always 1.
-    Response tokens → 1 iff both alt-2 and alt-3 answers fail.
-    """
     prompt     = build_prompt(question)
     prompt_ids = tokenizer(prompt, return_tensors="pt")["input_ids"][0].tolist()
     full_ids   = torch.tensor([prompt_ids + resp_ids], dtype=torch.long)
@@ -399,13 +380,12 @@ def run_phase1_finetune(
 @torch.no_grad()
 def get_token_probs(
     model: AutoModelForCausalLM,
-    input_ids: torch.Tensor,   # [1, seq_len]
+    input_ids: torch.Tensor,
     device: str,
 ) -> torch.Tensor:
-    """P(t_i | t_{<i}) for i in [1, seq_len). Shape: [seq_len-1]."""
-    logits    = model(input_ids.to(device)).logits[0].float()   # [seq_len, vocab]
-    log_probs = F.log_softmax(logits[:-1], dim=-1)              # [seq_len-1, vocab]
-    targets   = input_ids[0, 1:]                                # [seq_len-1]
+    logits    = model(input_ids.to(device)).logits[0].float()
+    log_probs = F.log_softmax(logits[:-1], dim=-1)
+    targets   = input_ids[0, 1:]
     return log_probs[torch.arange(log_probs.shape[0]), targets].exp().cpu()
 
 
@@ -426,7 +406,6 @@ def run_phase2_score(
     with open(data_path) as f:
         all_samples = [json.loads(l) for l in f]
 
-    # ── Pass 1: collect scores ─────────────────────────────────────────────────
     cache: List[Optional[Dict]] = []
     all_resp_scores: List[float] = []
 
@@ -439,7 +418,6 @@ def run_phase2_score(
         question = item["question"]
         prompt   = build_prompt(question)
 
-        # Greedy response from base model
         enc = tokenizer(prompt, return_tensors="pt")
         with torch.no_grad():
             out = base_model.generate(
@@ -456,7 +434,7 @@ def run_phase2_score(
         full_text = prompt + " " + response
         enc2      = tokenizer(full_text, return_tensors="pt",
                               max_length=MAX_LENGTH, truncation=True)
-        input_ids = enc2["input_ids"]            # [1, seq_len]
+        input_ids = enc2["input_ids"]
         seq_len   = input_ids.shape[1]
 
         prompt_enc = tokenizer(prompt, return_tensors="pt")
@@ -465,7 +443,7 @@ def run_phase2_score(
         try:
             probs_cft  = get_token_probs(cft_model,  input_ids, device)
             probs_base = get_token_probs(base_model, input_ids, device)
-            gap_scores = (probs_cft - probs_base).numpy()   # [seq_len-1]
+            gap_scores = (probs_cft - probs_base).numpy()
         except Exception as e:
             print(f"  Scoring error at sample {idx}: {e}")
             cache.append(None)
@@ -474,7 +452,6 @@ def run_phase2_score(
         token_ids  = input_ids[0].tolist()
         token_strs = [tokenizer.decode([tid]) for tid in token_ids]
 
-        # Collect response-region scores for global thresholding
         for i in range(seq_len):
             if i >= prompt_len and not is_format_token(token_strs[i]):
                 score_idx = i - 1
@@ -491,7 +468,6 @@ def run_phase2_score(
             "gap_scores": gap_scores,
         })
 
-    # ── Global threshold ───────────────────────────────────────────────────────
     if all_resp_scores:
         arr       = np.array(all_resp_scores, dtype=np.float32)
         threshold = float(np.percentile(arr, 100 * (1 - critical_ratio)))
@@ -501,7 +477,6 @@ def run_phase2_score(
         threshold = 0.0
         print("Warning: no scores collected. Threshold set to 0.")
 
-    # ── Pass 2: build masks ────────────────────────────────────────────────────
     print("Pass 2: building critical masks...")
     records = []
     for result in tqdm(cache):
@@ -539,27 +514,146 @@ def run_phase2_score(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Merge
+# Merge + expand
 # ══════════════════════════════════════════════════════════════════════════════
 
-def merge_masks(
+def merge_and_expand_masks(
     phase1_records: List[Dict],
     phase2_records: List[Dict],
     output_path: str,
+    tokenizer: AutoTokenizer,
+    context_mode: str = "window",  # "window" | "span"
+    window: int = 2,
 ) -> None:
+    """
+    Merge Phase 1 + Phase 2 records, then apply context expansion once
+    to the combined critical_mask of every sample.
+    """
     print(f"\n{'='*60}")
-    print("[Merge] Combining Phase 1 + Phase 2")
+    print(f"[Merge] Combining Phase 1 + Phase 2  (context_mode={context_mode!r}, window={window})")
     print(f"{'='*60}")
 
     p1_ids   = {r["id"] for r in phase1_records}
     p2_dedup = [r for r in phase2_records if r["id"] not in p1_ids]
     merged   = sorted(phase1_records + p2_dedup, key=lambda r: r["id"])
 
-    save_masks(merged, output_path)
-    total    = sum(len(r["critical_mask"]) for r in merged)
-    critical = sum(sum(r["critical_mask"]) for r in merged)
-    print(f"Merged {len(merged)} samples → {output_path}")
+    expanded_records = []
+    for r in tqdm(merged, desc="Expanding masks"):
+        token_ids  = r["token_ids"]
+        raw_mask   = r["critical_mask"]
+
+        token_strings = [
+            tokenizer.decode([tid], skip_special_tokens=False)
+            for tid in token_ids
+        ]
+        anchor_mask  = torch.tensor(raw_mask, dtype=torch.bool)
+        final_mask   = expand_mask(
+            anchor_mask,
+            token_strings,
+            mode=context_mode,
+            window=window,
+        )
+        expanded_records.append({**r, "critical_mask": final_mask.tolist()})
+
+    save_masks(expanded_records, output_path)
+    total    = sum(len(r["critical_mask"]) for r in expanded_records)
+    critical = sum(sum(r["critical_mask"]) for r in expanded_records)
+    print(f"Merged + expanded {len(expanded_records)} samples → {output_path}")
     print(f"  Total tokens: {total:,}  |  Critical: {critical:,} ({critical/max(total,1)*100:.1f}%)")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Public API
+# ══════════════════════════════════════════════════════════════════════════════
+
+def preprocess_dataset_cft(
+    data_path:      str,
+    output_path:    str,
+    base_model_name: str   = BASE_MODEL_NAME,
+    phase1_n:       int    = TARGET_SAMPLES,
+    finetune_steps: int    = FINETUNE_STEPS,
+    critical_ratio: float  = CRITICAL_RATIO,
+    context_mode:   str    = "window",   # "window" | "span"
+    window:         int    = 2,
+    skip_phase1:    bool   = False,
+    workdir:        str    = None,
+):
+    """
+    Full CFT-style scoring pipeline. Drop-in equivalent of
+    preprocess_dataset_* in other scorers.
+
+    Parameters
+    ----------
+    data_path       : GSM8K train JSONL path.
+    output_path     : Where to write the final masked JSONL.
+    base_model_name : Base model for Phase 1 annotation + Phase 2 scoring.
+    phase1_n        : Number of correctly-solved samples to annotate in Phase 1.
+    finetune_steps  : Gradient steps for Phase 1-B fine-tune.
+    critical_ratio  : Top fraction selected as critical in Phase 2.
+    context_mode    : "window" or "span" — passed to expand_mask at merge.
+    window          : Half-width for window mode.
+    skip_phase1     : If True and intermediate files exist, skip Phase 1.
+    workdir         : Directory for intermediate files. Defaults to the
+                      directory containing output_path.
+    """
+    if workdir is None:
+        workdir = os.path.dirname(os.path.abspath(output_path))
+    os.makedirs(workdir, exist_ok=True)
+
+    p1_path = os.path.join(workdir, "phase1_annotations.jsonl")
+    cft_dir = os.path.join(workdir, "M_cft")
+    p2_path = os.path.join(workdir, "phase2_masks.jsonl")
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype  = torch.bfloat16 if (device == "cuda" and torch.cuda.is_bf16_supported()) else torch.float16
+    print(f"Device: {device}  |  dtype: {dtype}")
+
+    # ── Phase 1 ───────────────────────────────────────────────────────────────
+    if skip_phase1 and os.path.exists(p1_path) and os.path.exists(os.path.join(cft_dir, "config.json")):
+        print("\n[Phase 1] Skipping — loading existing outputs...")
+        phase1_records = load_masks(p1_path)
+    else:
+        print(f"\nLoading base model: {base_model_name}")
+        tokenizer  = AutoTokenizer.from_pretrained(base_model_name)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        base_model = load_model(base_model_name, device, dtype)
+
+        phase1_records = run_phase1_annotate(
+            data_path, p1_path, base_model, tokenizer, device, phase1_n)
+
+        run_phase1_finetune(
+            phase1_records, cft_dir, base_model_name, device, dtype, finetune_steps)
+
+        del base_model
+        if device == "cuda":
+            torch.cuda.empty_cache()
+
+    # ── Phase 2 ───────────────────────────────────────────────────────────────
+    print(f"\nLoading models for Phase 2...")
+    tokenizer  = AutoTokenizer.from_pretrained(base_model_name)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    base_model = load_model(base_model_name, device, dtype)
+    cft_model  = load_model(cft_dir, device, dtype)
+
+    phase1_ids     = {r["id"] for r in phase1_records}
+    phase2_records = run_phase2_score(
+        data_path, p2_path,
+        base_model, cft_model, tokenizer, device,
+        phase1_ids=phase1_ids,
+        critical_ratio=critical_ratio,
+    )
+
+    # ── Merge + expand ────────────────────────────────────────────────────────
+    merge_and_expand_masks(
+        phase1_records, phase2_records, output_path,
+        tokenizer=tokenizer,
+        context_mode=context_mode,
+        window=window,
+    )
+
+    return output_path
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -574,59 +668,28 @@ def main():
     parser.add_argument("--phase1_n",       type=int,   default=TARGET_SAMPLES)
     parser.add_argument("--finetune_steps", type=int,   default=FINETUNE_STEPS)
     parser.add_argument("--critical_ratio", type=float, default=CRITICAL_RATIO)
+    parser.add_argument("--context_mode",   default="window", choices=["window", "span"],
+                        help="Context expansion mode applied at merge step")
+    parser.add_argument("--window",         type=int,   default=2,
+                        help="Half-width for window mode (ignored for span)")
     parser.add_argument("--skip_phase1",    action="store_true",
                         help="Skip Phase 1 if phase1_annotations.jsonl + M_cft already exist")
     args = parser.parse_args()
 
-    os.makedirs(args.workdir, exist_ok=True)
-    p1_path    = os.path.join(args.workdir, "phase1_annotations.jsonl")
-    cft_dir    = os.path.join(args.workdir, "M_cft")
-    p2_path    = os.path.join(args.workdir, "phase2_masks.jsonl")
     final_path = os.path.join(args.workdir, "cft_masks_final.jsonl")
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    dtype  = torch.bfloat16 if (device == "cuda" and torch.cuda.is_bf16_supported()) else torch.float16
-    print(f"Device: {device}  |  dtype: {dtype}")
-
-    # ── Phase 1 ───────────────────────────────────────────────────────────────
-    if args.skip_phase1 and os.path.exists(p1_path) and os.path.exists(os.path.join(cft_dir, "config.json")):
-        print("\n[Phase 1] Skipping — loading existing outputs...")
-        phase1_records = load_masks(p1_path)
-    else:
-        print(f"\nLoading base model: {args.base_model}")
-        tokenizer = AutoTokenizer.from_pretrained(args.base_model)
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-        base_model = load_model(args.base_model, device, dtype)
-
-        phase1_records = run_phase1_annotate(
-            args.data, p1_path, base_model, tokenizer, device, args.phase1_n)
-
-        run_phase1_finetune(
-            phase1_records, cft_dir, args.base_model, device, dtype, args.finetune_steps)
-
-        # Free base model — will reload below alongside CFT model
-        del base_model
-        torch.cuda.empty_cache() if device == "cuda" else None
-
-    # ── Phase 2 ───────────────────────────────────────────────────────────────
-    print(f"\nLoading models for Phase 2...")
-    tokenizer  = AutoTokenizer.from_pretrained(args.base_model)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    base_model = load_model(args.base_model, device, dtype)
-    cft_model  = load_model(cft_dir, device, dtype)
-
-    phase1_ids = {r["id"] for r in phase1_records}
-    phase2_records = run_phase2_score(
-        args.data, p2_path,
-        base_model, cft_model, tokenizer, device,
-        phase1_ids=phase1_ids,
+    preprocess_dataset_cft(
+        data_path=args.data,
+        output_path=final_path,
+        base_model_name=args.base_model,
+        phase1_n=args.phase1_n,
+        finetune_steps=args.finetune_steps,
         critical_ratio=args.critical_ratio,
+        context_mode=args.context_mode,
+        window=args.window,
+        skip_phase1=args.skip_phase1,
+        workdir=args.workdir,
     )
-
-    # ── Merge ─────────────────────────────────────────────────────────────────
-    merge_masks(phase1_records, phase2_records, final_path)
 
     print(f"\n✓ Done!  Final mask file: {final_path}")
 

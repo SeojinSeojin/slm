@@ -20,8 +20,10 @@ import torch.nn.functional as F
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from scoring.context_expansion import expand_mask
+
 TRAINING_MODEL_NAME  = "Qwen/Qwen2.5-1.5B"
-REFERENCE_MODEL_NAME = "Qwen/Qwen2.5-Math-7B"  # Same tokenizer, math-specialized
+REFERENCE_MODEL_NAME = "Qwen/Qwen2.5-Math-7B"
 
 
 @torch.no_grad()
@@ -34,16 +36,12 @@ def get_token_losses(
     Return per-position token-level CE loss.
     Cast logits to float32 before cross_entropy.
     """
-    input_ids    = input_ids.to(device)
-    outputs      = model(input_ids)
-    logits       = outputs.logits[0].float()
-
-    shift_logits = logits[:-1]
-    shift_labels = input_ids[0, 1:]
-
-    per_token_loss = F.cross_entropy(
-        shift_logits, shift_labels, reduction="none"
-    )
+    input_ids      = input_ids.to(device)
+    outputs        = model(input_ids)
+    logits         = outputs.logits[0].float()
+    shift_logits   = logits[:-1]
+    shift_labels   = input_ids[0, 1:]
+    per_token_loss = F.cross_entropy(shift_logits, shift_labels, reduction="none")
     return per_token_loss.cpu()
 
 
@@ -90,9 +88,25 @@ class RHO1Scorer:
         self,
         text:         str,
         select_ratio: float = 0.77,
+        context_mode: str   = None,   # None | "window" | "span"
+        window:       int   = 2,
         max_length:   int   = 512,
     ) -> dict:
-        """Eq.3: excess loss = L_training(x_i) - L_reference(x_i). Select top select_ratio%."""
+        """
+        Eq.3: excess loss = L_training(x_i) - L_reference(x_i).
+        Select top select_ratio%, optionally expand via context_expansion.
+
+        Parameters
+        ----------
+        select_ratio
+            Fraction of tokens to select as anchors.
+        context_mode
+            None   — no expansion (original RHO-1 behaviour).
+            "window" — expand each anchor by ±`window` tokens.
+            "span"   — expand each anchor to its full linguistic span.
+        window
+            Half-width used only when context_mode="window".
+        """
         enc = self.tokenizer(
             text, max_length=max_length, truncation=True, return_tensors="pt"
         )
@@ -112,11 +126,25 @@ class RHO1Scorer:
         token_ids_list = token_ids[0, :min_len].tolist()
         n_select  = max(1, int(min_len * select_ratio))
         threshold = np.sort(excess)[-n_select]
-        mask      = (excess >= threshold).tolist()
+        anchor_mask = torch.tensor(excess >= threshold, dtype=torch.bool)
+
+        if context_mode is not None:
+            token_strings = [
+                self.tokenizer.decode([tid], skip_special_tokens=False)
+                for tid in token_ids_list
+            ]
+            final_mask = expand_mask(
+                anchor_mask,
+                token_strings,
+                mode=context_mode,
+                window=window,
+            )
+        else:
+            final_mask = anchor_mask
 
         return {
             "token_ids":   token_ids_list,
-            "mask":        mask,
+            "mask":        final_mask.tolist(),
             "excess_loss": excess.tolist(),
         }
 
@@ -127,6 +155,8 @@ def preprocess_dataset_rho1(
     training_model_name:  str   = TRAINING_MODEL_NAME,
     reference_model_name: str   = REFERENCE_MODEL_NAME,
     select_ratio:         float = 0.77,
+    context_mode:         str   = None,
+    window:               int   = 2,
     max_length:           int   = 512,
 ):
     """Apply RHO-1 scoring to entire JSONL dataset."""
@@ -148,7 +178,11 @@ def preprocess_dataset_rho1(
         item = json.loads(line.strip())
         try:
             scored = scorer.score(
-                item["text"], select_ratio=select_ratio, max_length=max_length
+                item["text"],
+                select_ratio=select_ratio,
+                context_mode=context_mode,
+                window=window,
+                max_length=max_length,
             )
             results.append({
                 "text":      item["text"],
@@ -173,13 +207,18 @@ def preprocess_dataset_rho1(
 
 
 if __name__ == "__main__":
-    scorer = RHO1Scorer()
-    text   = "A boxer weighs 97 kg at 4 months from a fight. He loses 3 kg per month. How much will he weigh?"
-    result = scorer.score(text)
+    scorer    = RHO1Scorer()
     tokenizer = AutoTokenizer.from_pretrained(TRAINING_MODEL_NAME)
-    tokens = [tokenizer.decode([i]) for i in result["token_ids"]]
-    rendered = "".join(f"[{t}]" if m else t for t, m in zip(tokens, result["mask"]))
-    total = len(result["mask"])
-    sel   = sum(result["mask"])
-    print(f"\n{sel}/{total} = {sel/total:.1%}")
-    print(rendered)   
+    text      = "A boxer weighs 97 kg at 4 months from a fight. He loses 3 kg per month. How much will he weigh?"
+
+    for mode in (None, "window", "span"):
+        print(f"\n{'='*60}")
+        print(f"context_mode = {mode!r}")
+        print('='*60)
+        result   = scorer.score(text, context_mode=mode)
+        tokens   = [tokenizer.decode([i]) for i in result["token_ids"]]
+        rendered = "".join(f"[{t}]" if m else t for t, m in zip(tokens, result["mask"]))
+        total    = len(result["mask"])
+        sel      = sum(result["mask"])
+        print(f"{sel}/{total} = {sel/total:.1%}")
+        print(rendered)

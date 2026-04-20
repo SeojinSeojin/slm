@@ -9,11 +9,12 @@ import numpy as np
 from transformers import AutoTokenizer
 from tqdm import tqdm
 
+from scoring.context_expansion import expand_mask
+
 # ============================================================
 # Token category definitions
 # ============================================================
 
-# Quantity/change verbs — core math action words in word problems
 QUANTITY_VERBS = {
     "loses", "gains", "increases", "decreases", "doubles", "halves",
     "multiplies", "divides", "adds", "subtracts", "equals", "totals",
@@ -24,33 +25,27 @@ QUANTITY_VERBS = {
     "weighs", "measures", "counts",
 }
 
-# Comparison and relation words
 COMPARISON_WORDS = {
     "more", "fewer", "less", "greater", "larger", "smaller",
     "maximum", "minimum", "most", "least", "times", "twice", "triple",
     "total", "each", "per", "every",
 }
 
-# Math terminology
 MATH_TERMS = {
     "sum", "difference", "product", "quotient", "remainder",
     "ratio", "proportion", "percent", "rate", "average", "mean",
     "half", "quarter", "double",
 }
 
-# Logical/structural words (minimal)
 LOGICAL_WORDS = {
     "therefore", "thus", "hence", "let", "where",
 }
 
-# English number words — only large/ambiguous ones worth marking
-# Small ones (one~ten) skipped: Qwen tokenizer catches digits anyway
 ENGLISH_NUMBERS = {
     "hundred", "thousand", "million", "billion",
     "dozen", "half", "quarter",
 }
 
-# Time/unit words — only specific math-problem units, not generic ones
 UNIT_WORDS = {
     "dollars", "dollar", "cents", "cent", "percent",
     "kilometers", "km", "meters", "meter", "miles", "mile",
@@ -59,7 +54,6 @@ UNIT_WORDS = {
     "hours", "hour", "minutes", "minute",
 }
 
-# Combined keyword set
 LOGICAL_KEYWORDS = (
     QUANTITY_VERBS |
     COMPARISON_WORDS |
@@ -69,55 +63,46 @@ LOGICAL_KEYWORDS = (
     UNIT_WORDS
 )
 
-# Math expression patterns (regex)
 MATH_PATTERNS = [
-    r'\d+\.?\d*',                          # numbers (97, 3.14)
-    r'[+\-*/=<>≤≥≠±]',                   # operators
-    r'\\frac\{',                           # LaTeX fraction
-    r'\\sum|\\prod|\\int',                 # LaTeX sum/integral
-    r'\\sqrt|\\log|\\ln|\\exp',           # LaTeX functions
-    r'\\[a-zA-Z]+',                        # LaTeX commands
-    r'\$[^$]+\$',                          # inline math $...$
-    r'\$\$[^$]+\$\$',                      # display math $$...$$
-    r'[a-zA-Z]_\{?\d+\}?',               # variable subscript (x_1)
-    r'\([^)]*=\s*[^)]*\)',                # equation in parentheses
-    r'[a-zA-Z]\s*=\s*[a-zA-Z0-9]',       # variable assignment (x = 3)
-    r'[a-zA-Z]\s*:=\s*',                  # definition (x := ...)
-    r'let\s+[a-zA-Z]\s*=',               # "let x = ..."
-    r'where\s+[a-zA-Z]\s*=',             # "where x = ..."
-    r'→|⟹|⟺|\s*=>\s*',               # transition arrows
-    r'<<[^>]+>>',                          # GSM8K computation markers <<...>>
-    r'####',                               # GSM8K answer separator
+    r'\d+\.?\d*',
+    r'[+\-*/=<>≤≥≠±]',
+    r'\\frac\{',
+    r'\\sum|\\prod|\\int',
+    r'\\sqrt|\\log|\\ln|\\exp',
+    r'\\[a-zA-Z]+',
+    r'\$[^$]+\$',
+    r'\$\$[^$]+\$\$',
+    r'[a-zA-Z]_\{?\d+\}?',
+    r'\([^)]*=\s*[^)]*\)',
+    r'[a-zA-Z]\s*=\s*[a-zA-Z0-9]',
+    r'[a-zA-Z]\s*:=\s*',
+    r'let\s+[a-zA-Z]\s*=',
+    r'where\s+[a-zA-Z]\s*=',
+    r'→|⟹|⟺|\s*=>\s*',
+    r'<<[^>]+>>',
+    r'####',
 ]
 
 COMPILED_PATTERNS = [re.compile(p) for p in MATH_PATTERNS]
 
 
 def is_symbolic_token(token_str: str) -> bool:
-    """
-    Determine if a token is mathematically relevant.
-    Returns True if the token should be included in training.
-    """
+    """Return True if this token is mathematically relevant."""
     t = token_str.strip().lower()
 
-    # Skip empty/whitespace tokens
     if not t or t in {"", " ", "\n", "\t"}:
         return False
 
-    # 1) Math keywords (quantity verbs, numbers, units, etc.)
     if t in LOGICAL_KEYWORDS:
         return True
 
-    # 2) Regex pattern matching
     for pattern in COMPILED_PATTERNS:
         if pattern.search(token_str):
             return True
 
-    # 3) Any digit present
     if any(c.isdigit() for c in token_str):
         return True
 
-    # 4) Special math symbols
     math_symbols = set("+=−×÷≤≥≠∈∉⊂⊃∪∩∀∃∧∨¬→↔∞∑∏∫√π%$")
     if any(c in math_symbols for c in token_str):
         return True
@@ -125,38 +110,60 @@ def is_symbolic_token(token_str: str) -> bool:
     return False
 
 
+# ============================================================
+# Core scoring function
+# ============================================================
+
 def score_tokens_symbolic(
-    token_ids:      list,
-    tokenizer:      AutoTokenizer,
+    token_ids:    list | torch.Tensor,
+    tokenizer:    AutoTokenizer,
+    context_mode: str = "span",   # "span" | "window"
+    window:       int = 2,        # used only when context_mode="window"
+    # Legacy aliases kept for backwards compatibility
     select_ratio:   float = 0.40,
     context_window: int   = 2,
 ) -> torch.Tensor:
     """
-    Select symbolic tokens and expand with a context window.
+    Score tokens symbolically and expand anchors via context_expansion.
 
-    Context window preserves local reasoning context around each
-    selected token (e.g., 'loses' → 'He loses 3 kg per month').
+    Parameters
+    ----------
+    token_ids
+        Token ID sequence (list or 1-D tensor).
+    tokenizer
+        HuggingFace tokenizer matching the token IDs.
+    context_mode
+        "span"   — expand each anchor to its full linguistic span.
+        "window" — expand each anchor by ±`window` tokens.
+    window
+        Half-width for window mode (default 2).
+    select_ratio, context_window
+        Ignored; kept so old call-sites don't break.
     """
     if isinstance(token_ids, torch.Tensor):
         token_ids = token_ids.tolist()
 
-    seq_len  = len(token_ids)
-    symbolic = np.zeros(seq_len, dtype=bool)
+    seq_len = len(token_ids)
 
-    # Step 1: mark symbolic tokens
-    for i, tid in enumerate(token_ids):
-        token_str   = tokenizer.decode([tid], skip_special_tokens=False)
-        symbolic[i] = is_symbolic_token(token_str)
+    token_strings = [
+        tokenizer.decode([tid], skip_special_tokens=False)
+        for tid in token_ids
+    ]
 
-    # Step 2: expand with context window
-    mask = np.zeros(seq_len, dtype=bool)
-    for i in range(seq_len):
-        if symbolic[i]:
-            lo = max(0, i - context_window)
-            hi = min(seq_len, i + context_window + 1)
-            mask[lo:hi] = True
+    # Step 1: mark symbolic anchor tokens
+    anchors = np.zeros(seq_len, dtype=bool)
+    for i, token_str in enumerate(token_strings):
+        anchors[i] = is_symbolic_token(token_str)
 
-    return torch.tensor(mask, dtype=torch.bool)
+    anchor_mask = torch.tensor(anchors, dtype=torch.bool)
+
+    # Step 2: expand via shared module
+    return expand_mask(
+        anchor_mask,
+        token_strings,
+        mode=context_mode,
+        window=window,
+    )
 
 
 # ============================================================
@@ -164,16 +171,17 @@ def score_tokens_symbolic(
 # ============================================================
 
 def preprocess_dataset_symbolic(
-    data_path:      str,
-    output_path:    str,
-    tokenizer_name: str   = "Qwen/Qwen2.5-1.5B",
+    data_path:    str,
+    output_path:  str,
+    tokenizer_name: str = "Qwen/Qwen2.5-1.5B",
+    max_length:   int   = 512,
+    context_mode: str   = "span",
+    window:       int   = 2,
+    # Legacy aliases
     select_ratio:   float = 0.40,
-    max_length:     int   = 512,
     context_window: int   = 2,
 ):
-    """
-    Apply symbolic scoring to entire JSONL dataset and save masks.
-    """
+    """Apply symbolic scoring to an entire JSONL dataset and save masks."""
     print(f"Loading data: {data_path}")
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
     if tokenizer.pad_token is None:
@@ -201,8 +209,8 @@ def preprocess_dataset_symbolic(
 
         mask = score_tokens_symbolic(
             token_ids, tokenizer,
-            select_ratio=select_ratio,
-            context_window=context_window,
+            context_mode=context_mode,
+            window=window,
         )
 
         total_tokens    += len(token_ids)
@@ -237,11 +245,15 @@ if __name__ == "__main__":
         "John takes a pill every 6 hours. How many pills does he take a week?",
     ]
 
-    for text in test_texts:
-        enc      = tokenizer(text, return_tensors="pt")
-        token_ids = enc["input_ids"][0]
-        mask     = score_tokens_symbolic(token_ids, tokenizer)
-        tokens   = [tokenizer.decode([tid]) for tid in token_ids.tolist()]
-        rendered = "".join(f"[{t}]" if m else t for t, m in zip(tokens, mask.tolist()))
-        ratio    = mask.float().mean().item()
-        print(f"\n{ratio:.1%}: {rendered}")
+    for mode in ("span", "window"):
+        print(f"\n{'='*60}")
+        print(f"context_mode = {mode!r}")
+        print('='*60)
+        for text in test_texts:
+            enc       = tokenizer(text, return_tensors="pt")
+            token_ids = enc["input_ids"][0]
+            mask      = score_tokens_symbolic(token_ids, tokenizer, context_mode=mode)
+            tokens    = [tokenizer.decode([tid]) for tid in token_ids.tolist()]
+            rendered  = "".join(f"[{t}]" if m else t for t, m in zip(tokens, mask.tolist()))
+            ratio     = mask.float().mean().item()
+            print(f"\n{ratio:.1%}: {rendered}")

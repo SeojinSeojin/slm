@@ -18,6 +18,8 @@ import numpy as np
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from tqdm import tqdm
 
+from scoring.context_expansion import expand_mask
+
 GENERAL_MODEL_NAME  = "Qwen/Qwen2.5-1.5B"
 SYMBOLIC_MODEL_NAME = "Qwen/Qwen2.5-Math-7B"
 
@@ -45,7 +47,7 @@ def get_model_entropy(
 class EntropyGapScorer:
     """
     Approach A: select tokens with high H_general - H_math.
-    Expand with context window to preserve local reasoning context.
+    Expand anchors via shared context_expansion module.
     """
 
     def __init__(
@@ -86,13 +88,31 @@ class EntropyGapScorer:
         self,
         text:           str,
         select_ratio:   float = 0.25,
-        context_window: int   = 2,
+        context_mode:   str   = "window",  # "window" | "span"
+        window:         int   = 2,
         max_length:     int   = 512,
+        # Legacy alias
+        context_window: int   = None,
     ) -> dict:
         """
-        Select top select_ratio% by entropy gap, expand with context window.
-        select_ratio=0.25 + context_window=2 -> ~75% final ratio.
+        Select top select_ratio% by entropy gap, expand via context_expansion.
+
+        Parameters
+        ----------
+        select_ratio
+            Fraction of tokens to select as anchors before expansion.
+        context_mode
+            "window" — expand each anchor by ±`window` tokens.
+            "span"   — expand each anchor to its full linguistic span.
+        window
+            Half-width used only when context_mode="window".
+        context_window
+            Deprecated alias for `window`. Ignored if `window` is set explicitly.
         """
+        # Legacy alias handling
+        if context_window is not None and window == 2:
+            window = context_window
+
         enc = self.tokenizer(
             text, max_length=max_length, truncation=True, return_tensors="pt"
         )
@@ -111,24 +131,28 @@ class EntropyGapScorer:
 
         token_ids_list = token_ids[0, :min_len].tolist()
 
-        # Top-k% selection
+        # Top-k% anchor selection
         n_select  = max(1, int(min_len * select_ratio))
         threshold = np.sort(gap)[-n_select]
-        base_mask = gap >= threshold
+        anchor_mask = torch.tensor(gap >= threshold, dtype=torch.bool)
 
-        # Expand with context window
-        expanded = base_mask.copy()
-        for i in range(min_len):
-            if base_mask[i]:
-                lo = max(0, i - context_window)
-                hi = min(min_len, i + context_window + 1)
-                expanded[lo:hi] = True
+        # Decode token strings for span-mode boundary detection
+        token_strings = [
+            self.tokenizer.decode([tid], skip_special_tokens=False)
+            for tid in token_ids_list
+        ]
 
-        mask = expanded.tolist()
+        # Expand via shared module
+        expanded = expand_mask(
+            anchor_mask,
+            token_strings,
+            mode=context_mode,
+            window=window,
+        )
 
         return {
             "token_ids":        token_ids_list,
-            "mask":             mask,
+            "mask":             expanded.tolist(),
             "entropy_general":  entropy_g.tolist(),
             "entropy_symbolic": entropy_s.tolist(),
             "entropy_gap":      gap.tolist(),
@@ -141,10 +165,16 @@ def preprocess_dataset_entropy_gap(
     general_model_name:  str   = GENERAL_MODEL_NAME,
     symbolic_model_name: str   = SYMBOLIC_MODEL_NAME,
     select_ratio:        float = 0.25,
-    context_window:      int   = 2,
+    context_mode:        str   = "window",
+    window:              int   = 2,
     max_length:          int   = 512,
+    # Legacy alias
+    context_window:      int   = None,
 ):
     """Apply entropy gap scoring to entire JSONL dataset."""
+    if context_window is not None and window == 2:
+        window = context_window
+
     scorer = EntropyGapScorer(general_model_name, symbolic_model_name)
 
     with open(data_path, "r") as f:
@@ -163,7 +193,8 @@ def preprocess_dataset_entropy_gap(
             scored = scorer.score(
                 item["text"],
                 select_ratio=select_ratio,
-                context_window=context_window,
+                context_mode=context_mode,
+                window=window,
                 max_length=max_length,
             )
             results.append({
@@ -189,15 +220,23 @@ def preprocess_dataset_entropy_gap(
 
 
 if __name__ == "__main__":
-    scorer = EntropyGapScorer()
-    text = "Question: John takes a pill every 6 hours. How many pills does he take a week?\nAnswer: He takes 24/6=<<24/6=4>>4 pills a day\nSo he takes 4*7=<<4*7=28>>28 pills a week\n#### 28"
+    scorer    = EntropyGapScorer()
     tokenizer = AutoTokenizer.from_pretrained(GENERAL_MODEL_NAME)
+    text      = (
+        "Question: John takes a pill every 6 hours. How many pills does he take a week?\n"
+        "Answer: He takes 24/6=<<24/6=4>>4 pills a day\n"
+        "So he takes 4*7=<<4*7=28>>28 pills a week\n#### 28"
+    )
 
-    for ratio in [0.20, 0.25, 0.30]:
-        r = scorer.score(text, select_ratio=ratio, context_window=2)
-        tokens = [tokenizer.decode([i]) for i in r["token_ids"]]
-        sel = sum(r["mask"])
-        total = len(r["mask"])
-        rendered = "".join(f"[{t}]" if m else t for t, m in zip(tokens, r["mask"]))
-        print(f"\nselect_ratio={ratio}: {sel}/{total}={sel/total*100:.0f}%")
-        print(rendered)
+    for mode in ("window", "span"):
+        print(f"\n{'='*60}")
+        print(f"context_mode = {mode!r}")
+        print('='*60)
+        for ratio in [0.20, 0.25, 0.30]:
+            r      = scorer.score(text, select_ratio=ratio, context_mode=mode)
+            tokens = [tokenizer.decode([i]) for i in r["token_ids"]]
+            sel    = sum(r["mask"])
+            total  = len(r["mask"])
+            rendered = "".join(f"[{t}]" if m else t for t, m in zip(tokens, r["mask"]))
+            print(f"\nselect_ratio={ratio}: {sel}/{total}={sel/total*100:.0f}%")
+            print(rendered)

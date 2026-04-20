@@ -79,7 +79,7 @@ class MathConfidenceScorer:
         text:           str,
         gap_ratio:      float = 0.40,
         abs_ratio:      float = 0.40,
-        context_window: int   = 3,
+        context_window: int   = 2,
         max_length:     int   = 512,
     ) -> dict:
         enc = self.tokenizer(
@@ -135,7 +135,7 @@ def preprocess_dataset_math_confidence(
     math_model_name:    str   = MATH_MODEL_NAME,
     gap_ratio:          float = 0.40,
     abs_ratio:          float = 0.40,
-    context_window:     int   = 3,
+    context_window:     int   = 2,
     max_length:         int   = 512,
 ):
     """Apply Ours-C dual-threshold scoring to entire JSONL dataset."""
@@ -187,7 +187,7 @@ if __name__ == "__main__":
     text = "Question: Mark has a garden with 10 yellow flowers and 80% more purple ones. 25% as many green as yellow+purple. How many total?\nAnswer: Purple: 80/100*10=<<80/100*10=8>>8 more than yellow.\n#### 35"
     tokenizer = AutoTokenizer.from_pretrained(TRAINING_MODEL_NAME)
     for gap_r, abs_r in [(0.40, 0.40), (0.40, 0.50), (0.30, 0.40)]:
-        r = scorer.score(text, gap_ratio=gap_r, abs_ratio=abs_r, context_window=3)
+        r = scorer.score(text, gap_ratio=gap_r, abs_ratio=abs_r, context_window=2)
         tokens = [tokenizer.decode([i]) for i in r["token_ids"]]
         sel = sum(r["mask"])
         total = len(r["mask"])

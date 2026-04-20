@@ -87,7 +87,7 @@ if not os.path.exists(c_path):
     scorer = MathConfidenceScorer()
     total, selected = 0, 0
     for text in texts:
-        r = scorer.score(text, gap_ratio=0.40, abs_ratio=0.50, context_window=3)
+        r = scorer.score(text, gap_ratio=0.40, abs_ratio=0.50, context_window=2)
         total    += len(r["mask"])
         selected += sum(r["mask"])
     del scorer; clear()

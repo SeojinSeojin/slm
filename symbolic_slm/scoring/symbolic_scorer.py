@@ -129,7 +129,7 @@ def score_tokens_symbolic(
     token_ids:      list,
     tokenizer:      AutoTokenizer,
     select_ratio:   float = 0.40,
-    context_window: int   = 3,
+    context_window: int   = 2,
 ) -> torch.Tensor:
     """
     Select symbolic tokens and expand with a context window.
@@ -169,7 +169,7 @@ def preprocess_dataset_symbolic(
     tokenizer_name: str   = "Qwen/Qwen2.5-1.5B",
     select_ratio:   float = 0.40,
     max_length:     int   = 512,
-    context_window: int   = 3,
+    context_window: int   = 2,
 ):
     """
     Apply symbolic scoring to entire JSONL dataset and save masks.

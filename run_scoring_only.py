@@ -25,7 +25,7 @@ RUN_OURS_A = True
 RUN_OURS_C = True
 
 RHO1_SELECT_RATIO   = 0.77
-OURS_A_SELECT_RATIO = 0.25   # + context_window=3 -> ~75%
+OURS_A_SELECT_RATIO = 0.25   # + context_window=2 -> ~75%
 OURS_C_GAP_RATIO    = 0.40
 OURS_C_ABS_RATIO    = 0.40
 MAX_LENGTH          = 512
@@ -110,7 +110,7 @@ if RUN_OURS_A and need_scoring(a_path):
     preprocess_dataset_entropy_gap(
         data_path=RAW_PATH, output_path=a_path,
         select_ratio=OURS_A_SELECT_RATIO,
-        context_window=3,
+        context_window=2,
         max_length=MAX_LENGTH,
     )
     clear_memory()
@@ -128,7 +128,7 @@ if RUN_OURS_C and need_scoring(c_path):
     preprocess_dataset_math_confidence(
         data_path=RAW_PATH, output_path=c_path,
         gap_ratio=OURS_C_GAP_RATIO, abs_ratio=OURS_C_ABS_RATIO,
-        context_window=3, max_length=MAX_LENGTH,
+        context_window=2, max_length=MAX_LENGTH,
     )
     clear_memory()
     print("[Ours-C] Done.")

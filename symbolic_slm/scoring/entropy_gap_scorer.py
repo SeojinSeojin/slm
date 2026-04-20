@@ -86,12 +86,12 @@ class EntropyGapScorer:
         self,
         text:           str,
         select_ratio:   float = 0.25,
-        context_window: int   = 3,
+        context_window: int   = 2,
         max_length:     int   = 512,
     ) -> dict:
         """
         Select top select_ratio% by entropy gap, expand with context window.
-        select_ratio=0.25 + context_window=3 -> ~75% final ratio.
+        select_ratio=0.25 + context_window=2 -> ~75% final ratio.
         """
         enc = self.tokenizer(
             text, max_length=max_length, truncation=True, return_tensors="pt"
@@ -141,7 +141,7 @@ def preprocess_dataset_entropy_gap(
     general_model_name:  str   = GENERAL_MODEL_NAME,
     symbolic_model_name: str   = SYMBOLIC_MODEL_NAME,
     select_ratio:        float = 0.25,
-    context_window:      int   = 3,
+    context_window:      int   = 2,
     max_length:          int   = 512,
 ):
     """Apply entropy gap scoring to entire JSONL dataset."""
@@ -194,7 +194,7 @@ if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained(GENERAL_MODEL_NAME)
 
     for ratio in [0.20, 0.25, 0.30]:
-        r = scorer.score(text, select_ratio=ratio, context_window=3)
+        r = scorer.score(text, select_ratio=ratio, context_window=2)
         tokens = [tokenizer.decode([i]) for i in r["token_ids"]]
         sel = sum(r["mask"])
         total = len(r["mask"])

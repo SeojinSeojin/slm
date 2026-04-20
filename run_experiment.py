@@ -49,7 +49,7 @@ CONFIG = {
     "run_rho1":   True,
     "run_ours_b": True,
     "run_ours_a": True,
-    "run_ours_c": True,
+    "run_ours_c": False,
     "run_base":   False,
 }
 
@@ -262,7 +262,7 @@ if CONFIG["run_ours_c"] and need_scoring(c_scored_path):
     from symbolic_slm.scoring.math_confidence_scorer import preprocess_dataset_math_confidence
     preprocess_dataset_math_confidence(
         data_path=raw_path, output_path=c_scored_path,
-        gap_ratio=0.40, abs_ratio=0.40, context_window=3,
+        gap_ratio=0.40, abs_ratio=0.40, context_window=2,
         max_length=CONFIG["max_length"],
     )
     clear_memory()

@@ -1,24 +1,17 @@
-# scorers/cft_scorer.py
+# scoring/cft_scorer.py
 #
-# Method C (CFT-style) Scorer — All-in-one
+# Method C (CFT-style) Scorer — Optimized
 #
-# Two-phase CFT-style token scoring that produces a binary critical mask
-# per token for each sample in GSM8K train.
-#
-# Phase 1-A: Greedy filter 500 correct samples + counterfactual perturbation → ground-truth masks
-# Phase 1-B: Brief fine-tune on those masks → M_cft
-# Phase 2:   P_cft - P_base probability gap → top 15% critical for all remaining samples
-# Merge:     Phase 1 + Phase 2 → expand_mask → cft_masks_final.jsonl
-#
-# Usage:
-#   python cft_scorer.py --data gsm8k_train.jsonl
-#   python cft_scorer.py --data gsm8k_train.jsonl --skip_phase1  # if M_cft already exists
+# Optimizations applied:
+#   1. phase1_n: 500 → 100   (5x fewer counterfactual generations)
+#   2. finetune_steps: 75 → 30
+#   3. Phase 2: no greedy generation — use gold answer text directly
+#   4. MAX_NEW_TOKENS: 512 → 256
 
 import json
 import os
 import re
 import argparse
-import tempfile
 
 import numpy as np
 import torch
@@ -29,19 +22,19 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from tqdm import tqdm
 from typing import List, Dict, Optional, Tuple, Any
 
-from scoring.context_expansion import expand_mask
+from symbolic_slm.scoring.context_expansion import expand_mask
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Constants
 # ──────────────────────────────────────────────────────────────────────────────
 
 BASE_MODEL_NAME  = "Qwen/Qwen2.5-1.5B"
-TARGET_SAMPLES   = 500
+TARGET_SAMPLES   = 50    # optimized: was 500
 TOPK             = 3
-MAX_NEW_TOKENS   = 512
+MAX_NEW_TOKENS   = 256    # optimized: was 512
 SUFFIX_EXTRA     = 20
 CRITICAL_RATIO   = 0.15
-FINETUNE_STEPS   = 75
+FINETUNE_STEPS   = 30     # optimized: was 75
 LEARNING_RATE    = 2e-5
 BATCH_SIZE       = 2
 GRAD_ACCUM       = 4
@@ -79,15 +72,25 @@ def save_masks(records: List[Dict[str, Any]], path: str) -> None:
     with open(path, "w") as f:
         for r in records:
             out = {
+                "text":          r.get("text", ""),
+                "token_ids":     r["token_ids"],
+                "mask":          r["critical_mask"],
+                "method":        "cft",
+            }
+            f.write(json.dumps(out) + "\n")
+
+
+def save_masks_intermediate(records: List[Dict[str, Any]], path: str) -> None:
+    """Save intermediate format (with id/question/response fields)."""
+    with open(path, "w") as f:
+        for r in records:
+            out = {
                 "id":            r["id"],
                 "question":      r["question"],
-                "response":      r["response"],
+                "response":      r.get("response", ""),
                 "token_ids":     r["token_ids"],
                 "critical_mask": r["critical_mask"],
             }
-            for k, v in r.items():
-                if k not in out:
-                    out[k] = v
             f.write(json.dumps(out) + "\n")
 
 
@@ -229,13 +232,14 @@ def run_phase1_annotate(
 ) -> List[Dict]:
     print(f"\n{'='*60}")
     print("[Phase 1-A] Greedy filter + counterfactual annotation")
+    print(f"  target_n={target_n}  MAX_NEW_TOKENS={MAX_NEW_TOKENS}")
     print(f"{'='*60}")
 
     with open(data_path) as f:
         all_samples = [json.loads(l) for l in f]
 
     annotations = []
-    print(f"Scanning {len(all_samples)} samples for {target_n} correctly-solved ones...")
+    print(f"Scanning {len(all_samples)} samples for {target_n} correct ones...")
 
     for item in tqdm(all_samples):
         if len(annotations) >= target_n:
@@ -266,7 +270,7 @@ def run_phase1_annotate(
         })
 
     print(f"Collected {len(annotations)} annotated samples.")
-    save_masks(annotations, output_path)
+    save_masks_intermediate(annotations, output_path)
     print(f"Saved → {output_path}")
     return annotations
 
@@ -314,7 +318,7 @@ def run_phase1_finetune(
     steps: int = FINETUNE_STEPS,
 ) -> str:
     print(f"\n{'='*60}")
-    print("[Phase 1-B] Brief fine-tune → M_cft")
+    print(f"[Phase 1-B] Brief fine-tune → M_cft  (steps={steps})")
     print(f"{'='*60}")
 
     tokenizer = AutoTokenizer.from_pretrained(base_model_name)
@@ -374,7 +378,7 @@ def run_phase1_finetune(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Phase 2  Probability-gap scoring
+# Phase 2  Probability-gap scoring (optimized: use gold text, no generation)
 # ══════════════════════════════════════════════════════════════════════════════
 
 @torch.no_grad()
@@ -399,8 +403,12 @@ def run_phase2_score(
     phase1_ids: set,
     critical_ratio: float = CRITICAL_RATIO,
 ) -> List[Dict]:
+    """
+    Optimized Phase 2: use gold answer text directly instead of
+    greedy generation. Avoids 7473 forward+generate calls.
+    """
     print(f"\n{'='*60}")
-    print("[Phase 2] Probability-gap scoring (all samples)")
+    print("[Phase 2] Probability-gap scoring (gold text, no generation)")
     print(f"{'='*60}")
 
     with open(data_path) as f:
@@ -416,29 +424,19 @@ def run_phase2_score(
             continue
 
         question = item["question"]
-        prompt   = build_prompt(question)
+        # Optimization: use gold answer text directly, no greedy generate
+        answer   = item["answer"]
+        text     = f"Question: {question}\nAnswer: {answer}"
 
-        enc = tokenizer(prompt, return_tensors="pt")
-        with torch.no_grad():
-            out = base_model.generate(
-                **enc.to(device),
-                max_new_tokens=MAX_NEW_TOKENS,
-                do_sample=False,
-                temperature=1.0,
-                pad_token_id=tokenizer.eos_token_id,
-            )
-        p_len    = enc["input_ids"].shape[1]
-        resp_ids = out[0, p_len:].tolist()
-        response = tokenizer.decode(resp_ids, skip_special_tokens=True)
-
-        full_text = prompt + " " + response
-        enc2      = tokenizer(full_text, return_tensors="pt",
-                              max_length=MAX_LENGTH, truncation=True)
-        input_ids = enc2["input_ids"]
+        enc = tokenizer(
+            text, return_tensors="pt",
+            max_length=MAX_LENGTH, truncation=True,
+        )
+        input_ids = enc["input_ids"]
         seq_len   = input_ids.shape[1]
 
-        prompt_enc = tokenizer(prompt, return_tensors="pt")
-        prompt_len = prompt_enc["input_ids"].shape[1]
+        prompt     = build_prompt(question)
+        prompt_len = tokenizer(prompt, return_tensors="pt")["input_ids"].shape[1]
 
         try:
             probs_cft  = get_token_probs(cft_model,  input_ids, device)
@@ -461,11 +459,12 @@ def run_phase2_score(
         cache.append({
             "sample_id":  idx,
             "question":   question,
-            "response":   response,
+            "response":   answer,
             "token_ids":  token_ids,
             "token_strs": token_strs,
             "prompt_len": prompt_len,
             "gap_scores": gap_scores,
+            "text":       text,
         })
 
     if all_resp_scores:
@@ -503,9 +502,10 @@ def run_phase2_score(
             "response":      result["response"],
             "token_ids":     token_ids,
             "critical_mask": mask,
+            "text":          result["text"],
         })
 
-    save_masks(records, output_path)
+    save_masks_intermediate(records, output_path)
     total    = sum(len(r["critical_mask"]) for r in records)
     critical = sum(sum(r["critical_mask"]) for r in records)
     print(f"Saved {len(records)} samples → {output_path}")
@@ -522,13 +522,9 @@ def merge_and_expand_masks(
     phase2_records: List[Dict],
     output_path: str,
     tokenizer: AutoTokenizer,
-    context_mode: str = "window",  # "window" | "span"
+    context_mode: str = "window",
     window: int = 2,
 ) -> None:
-    """
-    Merge Phase 1 + Phase 2 records, then apply context expansion once
-    to the combined critical_mask of every sample.
-    """
     print(f"\n{'='*60}")
     print(f"[Merge] Combining Phase 1 + Phase 2  (context_mode={context_mode!r}, window={window})")
     print(f"{'='*60}")
@@ -541,21 +537,26 @@ def merge_and_expand_masks(
     for r in tqdm(merged, desc="Expanding masks"):
         token_ids  = r["token_ids"]
         raw_mask   = r["critical_mask"]
+        text       = r.get("text", "")
 
         token_strings = [
             tokenizer.decode([tid], skip_special_tokens=False)
             for tid in token_ids
         ]
-        anchor_mask  = torch.tensor(raw_mask, dtype=torch.bool)
-        final_mask   = expand_mask(
-            anchor_mask,
-            token_strings,
-            mode=context_mode,
-            window=window,
+        anchor_mask = torch.tensor(raw_mask, dtype=torch.bool)
+        final_mask  = expand_mask(
+            anchor_mask, token_strings,
+            mode=context_mode, window=window,
         )
-        expanded_records.append({**r, "critical_mask": final_mask.tolist()})
+        expanded_records.append({
+            "text":          text,
+            "token_ids":     token_ids,
+            "critical_mask": final_mask.tolist(),
+        })
 
+    # Save in standard scorer format (mask field, not critical_mask)
     save_masks(expanded_records, output_path)
+
     total    = sum(len(r["critical_mask"]) for r in expanded_records)
     critical = sum(sum(r["critical_mask"]) for r in expanded_records)
     print(f"Merged + expanded {len(expanded_records)} samples → {output_path}")
@@ -567,37 +568,65 @@ def merge_and_expand_masks(
 # ══════════════════════════════════════════════════════════════════════════════
 
 def preprocess_dataset_cft(
-    data_path:      str,
-    output_path:    str,
+    data_path:       str,
+    output_path:     str,
     base_model_name: str   = BASE_MODEL_NAME,
-    phase1_n:       int    = TARGET_SAMPLES,
-    finetune_steps: int    = FINETUNE_STEPS,
-    critical_ratio: float  = CRITICAL_RATIO,
-    context_mode:   str    = "window",   # "window" | "span"
-    window:         int    = 2,
-    skip_phase1:    bool   = False,
-    workdir:        str    = None,
+    phase1_n:        int   = TARGET_SAMPLES,
+    finetune_steps:  int   = FINETUNE_STEPS,
+    critical_ratio:  float = CRITICAL_RATIO,
+    context_mode:    str   = "window",
+    window:          int   = 2,
+    skip_phase1:     bool  = False,
+    workdir:         str   = None,
+):
+    """Single-variant wrapper around preprocess_dataset_cft_variants."""
+    preprocess_dataset_cft_variants(
+        data_path=data_path,
+        variants=[(context_mode, window, output_path)],
+        base_model_name=base_model_name,
+        phase1_n=phase1_n,
+        finetune_steps=finetune_steps,
+        critical_ratio=critical_ratio,
+        skip_phase1=skip_phase1,
+        workdir=workdir,
+    )
+
+
+def preprocess_dataset_cft_variants(
+    data_path:       str,
+    variants:        list,
+    base_model_name: str   = BASE_MODEL_NAME,
+    phase1_n:        int   = TARGET_SAMPLES,
+    finetune_steps:  int   = FINETUNE_STEPS,
+    critical_ratio:  float = CRITICAL_RATIO,
+    skip_phase1:     bool  = False,
+    workdir:         str   = None,
 ):
     """
-    Full CFT-style scoring pipeline. Drop-in equivalent of
-    preprocess_dataset_* in other scorers.
+    Run Phase 1 + Phase 2 once, then write multiple variant outputs.
 
     Parameters
     ----------
-    data_path       : GSM8K train JSONL path.
-    output_path     : Where to write the final masked JSONL.
-    base_model_name : Base model for Phase 1 annotation + Phase 2 scoring.
-    phase1_n        : Number of correctly-solved samples to annotate in Phase 1.
-    finetune_steps  : Gradient steps for Phase 1-B fine-tune.
-    critical_ratio  : Top fraction selected as critical in Phase 2.
-    context_mode    : "window" or "span" — passed to expand_mask at merge.
-    window          : Half-width for window mode.
-    skip_phase1     : If True and intermediate files exist, skip Phase 1.
-    workdir         : Directory for intermediate files. Defaults to the
-                      directory containing output_path.
+    variants
+        List of (context_mode, window, output_path) tuples.
+        context_mode: "window" | "span"
+
+    Example
+    -------
+    preprocess_dataset_cft_variants(
+        data_path="gsm8k_train.jsonl",
+        variants=[
+            ("window", 1, "cft_window_w1.jsonl"),
+            ("window", 3, "cft_window_w3.jsonl"),
+            ("span",   1, "cft_span_w1.jsonl"),
+            ("span",   3, "cft_span_w3.jsonl"),
+        ],
+        workdir="cft_workdir",
+    )
     """
+    # Use directory of first output as default workdir
     if workdir is None:
-        workdir = os.path.dirname(os.path.abspath(output_path))
+        workdir = os.path.dirname(os.path.abspath(variants[0][2]))
     os.makedirs(workdir, exist_ok=True)
 
     p1_path = os.path.join(workdir, "phase1_annotations.jsonl")
@@ -630,30 +659,76 @@ def preprocess_dataset_cft(
             torch.cuda.empty_cache()
 
     # ── Phase 2 ───────────────────────────────────────────────────────────────
-    print(f"\nLoading models for Phase 2...")
-    tokenizer  = AutoTokenizer.from_pretrained(base_model_name)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    base_model = load_model(base_model_name, device, dtype)
-    cft_model  = load_model(cft_dir, device, dtype)
+    # Load phase2 from cache if all output variants already exist
+    all_exist = all(os.path.exists(out_path) for _, _, out_path in variants)
+    if all_exist:
+        print("\nAll variant output files already exist — skipping Phase 2.")
+        return
 
-    phase1_ids     = {r["id"] for r in phase1_records}
-    phase2_records = run_phase2_score(
-        data_path, p2_path,
-        base_model, cft_model, tokenizer, device,
-        phase1_ids=phase1_ids,
-        critical_ratio=critical_ratio,
-    )
+    if os.path.exists(p2_path):
+        print("\n[Phase 2] Loading cached phase2 masks...")
+        phase2_records = load_masks(p2_path)
+        tokenizer = AutoTokenizer.from_pretrained(base_model_name)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+    else:
+        print(f"\nLoading models for Phase 2...")
+        tokenizer  = AutoTokenizer.from_pretrained(base_model_name)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        base_model = load_model(base_model_name, device, dtype)
+        cft_model  = load_model(cft_dir, device, dtype)
 
-    # ── Merge + expand ────────────────────────────────────────────────────────
-    merge_and_expand_masks(
-        phase1_records, phase2_records, output_path,
-        tokenizer=tokenizer,
-        context_mode=context_mode,
-        window=window,
-    )
+        phase1_ids     = {r["id"] for r in phase1_records}
+        phase2_records = run_phase2_score(
+            data_path, p2_path,
+            base_model, cft_model, tokenizer, device,
+            phase1_ids=phase1_ids,
+            critical_ratio=critical_ratio,
+        )
 
-    return output_path
+        del base_model, cft_model
+        if device == "cuda":
+            torch.cuda.empty_cache()
+
+    # ── Merge + expand — one pass per variant ─────────────────────────────────
+    p1_ids   = {r["id"] for r in phase1_records}
+    p2_dedup = [r for r in phase2_records if r["id"] not in p1_ids]
+    merged   = sorted(phase1_records + p2_dedup, key=lambda r: r["id"])
+
+    # Decode token strings once, shared across all variants
+    print("\nDecoding token strings (shared across variants)...")
+    token_strings_cache = []
+    for r in tqdm(merged, desc="Decoding"):
+        token_strings_cache.append([
+            tokenizer.decode([tid], skip_special_tokens=False)
+            for tid in r["token_ids"]
+        ])
+
+    for context_mode, window, out_path in variants:
+        if os.path.exists(out_path):
+            print(f"  Already exists: {os.path.basename(out_path)} — skipping")
+            continue
+
+        print(f"\n[Merge+Expand] context_mode={context_mode!r}  window={window}  → {os.path.basename(out_path)}")
+        expanded_records = []
+        for r, token_strings in tqdm(zip(merged, token_strings_cache), total=len(merged)):
+            anchor_mask = torch.tensor(r["critical_mask"], dtype=torch.bool)
+            final_mask  = expand_mask(
+                anchor_mask, token_strings,
+                mode=context_mode, window=window,
+            )
+            expanded_records.append({
+                "text":          r.get("text", ""),
+                "token_ids":     r["token_ids"],
+                "critical_mask": final_mask.tolist(),
+            })
+
+        save_masks(expanded_records, out_path)
+        total    = sum(len(r["critical_mask"]) for r in expanded_records)
+        critical = sum(sum(r["critical_mask"]) for r in expanded_records)
+        print(f"  Saved {len(expanded_records)} samples → {out_path}")
+        print(f"  Total tokens: {total:,}  |  Critical: {critical:,} ({critical/max(total,1)*100:.1f}%)")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -661,19 +736,16 @@ def preprocess_dataset_cft(
 # ══════════════════════════════════════════════════════════════════════════════
 
 def main():
-    parser = argparse.ArgumentParser(description="CFT-style scorer (all-in-one)")
-    parser.add_argument("--data",           required=True,      help="GSM8K train JSONL")
-    parser.add_argument("--workdir",        default=".",        help="Output directory")
+    parser = argparse.ArgumentParser(description="CFT-style scorer (optimized)")
+    parser.add_argument("--data",           required=True)
+    parser.add_argument("--workdir",        default=".")
     parser.add_argument("--base_model",     default=BASE_MODEL_NAME)
     parser.add_argument("--phase1_n",       type=int,   default=TARGET_SAMPLES)
     parser.add_argument("--finetune_steps", type=int,   default=FINETUNE_STEPS)
     parser.add_argument("--critical_ratio", type=float, default=CRITICAL_RATIO)
-    parser.add_argument("--context_mode",   default="window", choices=["window", "span"],
-                        help="Context expansion mode applied at merge step")
-    parser.add_argument("--window",         type=int,   default=2,
-                        help="Half-width for window mode (ignored for span)")
-    parser.add_argument("--skip_phase1",    action="store_true",
-                        help="Skip Phase 1 if phase1_annotations.jsonl + M_cft already exist")
+    parser.add_argument("--context_mode",   default="window", choices=["window", "span"])
+    parser.add_argument("--window",         type=int,   default=2)
+    parser.add_argument("--skip_phase1",    action="store_true")
     args = parser.parse_args()
 
     final_path = os.path.join(args.workdir, "cft_masks_final.jsonl")
@@ -690,8 +762,7 @@ def main():
         skip_phase1=args.skip_phase1,
         workdir=args.workdir,
     )
-
-    print(f"\n✓ Done!  Final mask file: {final_path}")
+    print(f"\nDone! Final mask file: {final_path}")
 
 
 if __name__ == "__main__":

@@ -19,14 +19,22 @@ from tqdm import tqdm
 
 class SLMDataset(Dataset):
     """
-    CT mode  : mask 무시, 전체 토큰 loss
-    SLM mode : mask=True 토큰에만 loss
+    CT mode           : mask 무시, 전체 토큰 loss
+    SLM mode          : mask=True 토큰에만 loss
+    answer_weight mode: 전체 토큰 loss + #### 이후 answer 토큰에 가중치
     """
 
-    def __init__(self, data_path: str, max_length: int = 384, ct_mode: bool = False):
-        self.max_length = max_length
-        self.ct_mode    = ct_mode
-        self.data       = []
+    def __init__(
+        self,
+        data_path:     str,
+        max_length:    int   = 384,
+        ct_mode:       bool  = False,
+        answer_weight: float = 1.0,   # > 1.0 → weight answer tokens higher
+    ):
+        self.max_length    = max_length
+        self.ct_mode       = ct_mode
+        self.answer_weight = answer_weight
+        self.data          = []
 
         with open(data_path) as f:
             for line in f:
@@ -37,9 +45,25 @@ class SLMDataset(Dataset):
                     continue
                 if ct_mode:
                     mask = [True] * len(ids)
-                self.data.append({"input_ids": ids, "mask": mask})
 
-        mode_str = "CT (전체)" if ct_mode else "SLM (선별)"
+                # Build per-token weight using text to find #### boundary
+                if answer_weight != 1.0:
+                    text     = item.get("text", "")
+                    boundary = _find_answer_boundary(ids, text)
+                    weights  = [answer_weight if i >= boundary else 1.0
+                                for i in range(len(ids))][:max_length]
+                else:
+                    weights = [1.0] * len(ids)
+
+                self.data.append({
+                    "input_ids": ids,
+                    "mask":      mask,
+                    "weights":   weights,
+                })
+
+        mode_str = "CT (전체)" if ct_mode else (
+            f"Answer-weighted (w={answer_weight})" if answer_weight != 1.0 else "SLM (선별)"
+        )
         selected = sum(sum(d["mask"]) for d in self.data)
         total    = sum(len(d["input_ids"]) for d in self.data)
         print(f"✅ {len(self.data):,}개 문서 [{mode_str}]"
@@ -52,6 +76,23 @@ class SLMDataset(Dataset):
         return self.data[idx]
 
 
+def _find_answer_boundary(token_ids: list, text: str) -> int:
+    """
+    Find the token index where the answer region starts (after ####).
+    Uses character-level position of '####' in text, then maps to token index
+    via approximate character-to-token ratio.
+    Falls back to last 15% of tokens if #### not found.
+    """
+    idx = text.find("####")
+    if idx == -1:
+        return int(len(token_ids) * 0.85)
+
+    # Approximate: map char position to token index via ratio
+    ratio    = idx / max(len(text), 1)
+    boundary = int(len(token_ids) * ratio)
+    return max(0, min(boundary, len(token_ids) - 1))
+
+
 # ============================================================
 # Collate
 # ============================================================
@@ -62,21 +103,25 @@ def collate_fn(batch, pad_token_id: int, max_length: int):
     input_ids_list      = []
     attention_mask_list = []
     loss_mask_list      = []
+    weights_list        = []
 
     for b in batch:
-        ids    = b["input_ids"][:max_len]
-        mask   = b["mask"][:max_len]
-        length = len(ids)
-        pad    = max_len - length
+        ids     = b["input_ids"][:max_len]
+        mask    = b["mask"][:max_len]
+        weights = b.get("weights", [1.0] * len(ids))[:max_len]
+        length  = len(ids)
+        pad     = max_len - length
 
-        input_ids_list.append(     ids  + [pad_token_id] * pad)
-        attention_mask_list.append([1]  * length + [0]   * pad)
-        loss_mask_list.append(     mask + [False] * pad)
+        input_ids_list.append(     ids     + [pad_token_id] * pad)
+        attention_mask_list.append([1]     * length + [0]   * pad)
+        loss_mask_list.append(     mask    + [False] * pad)
+        weights_list.append(       weights + [1.0]   * pad)
 
     return {
         "input_ids":      torch.tensor(input_ids_list,      dtype=torch.long),
         "attention_mask": torch.tensor(attention_mask_list, dtype=torch.long),
         "loss_mask":      torch.tensor(loss_mask_list,      dtype=torch.bool),
+        "weights":        torch.tensor(weights_list,        dtype=torch.float),
     }
 
 
@@ -88,10 +133,11 @@ def compute_loss(
     logits:    torch.Tensor,
     input_ids: torch.Tensor,
     loss_mask: torch.Tensor,
+    weights:   torch.Tensor = None,
 ) -> torch.Tensor:
     """
-    mask=True 토큰에만 CE loss.
-    OOM 방지: 선택 토큰만 추출 후 CE 계산.
+    CE loss on mask=True tokens, optionally weighted per token.
+    weights: float tensor same shape as input_ids (1.0 = normal, >1.0 = emphasized).
     """
     shift_logits = logits[:,   :-1, :].contiguous()
     shift_labels = input_ids[:, 1: ].contiguous()
@@ -106,6 +152,15 @@ def compute_loss(
 
     if selected_logits.numel() == 0:
         return torch.tensor(0.0, device=logits.device, requires_grad=True)
+
+    if weights is not None:
+        shift_weights    = weights[:, 1:].contiguous()
+        flat_weights     = shift_weights.view(-1)
+        selected_weights = flat_weights[flat_mask]
+        per_token_loss   = nn.functional.cross_entropy(
+            selected_logits, selected_labels, reduction="none"
+        )
+        return (per_token_loss * selected_weights).mean()
 
     return nn.functional.cross_entropy(selected_logits, selected_labels)
 
@@ -226,11 +281,12 @@ class SLMTrainer:
                 input_ids = batch["input_ids"].to(self.device)
                 attn_mask = batch["attention_mask"].to(self.device)
                 loss_mask = batch["loss_mask"].to(self.device)
+                weights   = batch["weights"].to(self.device) if "weights" in batch else None
 
                 with torch.autocast(device_type=self.device, dtype=self.dtype,
                                     enabled=(self.device == "cuda")):
                     outputs = self.model(input_ids=input_ids, attention_mask=attn_mask)
-                    loss    = compute_loss(outputs.logits, input_ids, loss_mask)
+                    loss    = compute_loss(outputs.logits, input_ids, loss_mask, weights)
                     loss    = loss / self.grad_accum_steps
 
                 self.scaler.scale(loss).backward() if self.use_scaler else loss.backward()

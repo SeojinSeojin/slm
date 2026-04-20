@@ -18,7 +18,7 @@ import numpy as np
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from tqdm import tqdm
 
-from scoring.context_expansion import expand_mask
+from symbolic_slm.scoring.context_expansion import expand_mask
 
 GENERAL_MODEL_NAME  = "Qwen/Qwen2.5-1.5B"
 SYMBOLIC_MODEL_NAME = "Qwen/Qwen2.5-Math-7B"

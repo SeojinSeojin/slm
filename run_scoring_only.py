@@ -19,12 +19,12 @@ RAW_PATH = os.path.join(DATA_DIR, "gsm8k_train.jsonl")
 # ============================================================
 # CONFIG — toggle as needed
 # ============================================================
-RUN_RHO1   = True
-RUN_OURS_B = True
-RUN_OURS_A = True
+RUN_RHO1   = False
+RUN_OURS_B = False
+RUN_OURS_A = False
 RUN_OURS_C = True
 
-RHO1_SELECT_RATIO   = 0.77
+RHO1_SELECT_RATIO   = 0.2
 OURS_A_SELECT_RATIO = 0.20
 OURS_C_GAP_RATIO    = 0.40
 OURS_C_ABS_RATIO    = 0.40
@@ -72,8 +72,9 @@ if not os.path.exists(RAW_PATH):
     ds = load_dataset("openai/gsm8k", "main", split="train")
     with open(RAW_PATH, "w") as f:
         for item in ds:
-            text = f"Question: {item['question'].strip()}\nAnswer: {item['answer'].strip()}"
-            f.write(json.dumps({"text": text}) + "\n")
+            f.write(json.dumps({"question": item['question'], "answer": item['answer']}) + "\n")
+            # text = f"Question: {item['question'].strip()}\nAnswer: {item['answer'].strip()}"
+            # f.write(json.dumps({"text": text}) + "\n")
     print(f"  Saved {len(ds)} examples")
 else:
     with open(RAW_PATH) as f:
@@ -175,22 +176,19 @@ if RUN_OURS_A:
 # — variants: window/span × w1/w3
 # ============================================================
 if RUN_OURS_C:
-    from symbolic_slm.scoring.cft_scorer import preprocess_dataset_cft
+    from symbolic_slm.scoring.cft_scorer import preprocess_dataset_cft_variants
 
-    for mode, w in CONTEXT_VARIANTS:
-        path = os.path.join(DATA_DIR, f"gsm8k_cft_{variant_suffix(mode, w)}.jsonl")
-        if need_scoring(path):
-            print(f"\n[Ours-C] {variant_suffix(mode, w)}...")
-            clear_memory()
-            preprocess_dataset_cft(
-                data_path=RAW_PATH,
-                output_path=path,
-                context_mode=mode,
-                window=w,
-            )
-
-    clear_memory()
-    print("[Ours-C] Done.")
+    variants = [
+        (mode, w, os.path.join(DATA_DIR, f"gsm8k_cft_{variant_suffix(mode, w)}.jsonl"))
+        for mode, w in CONTEXT_VARIANTS
+        if need_scoring(os.path.join(DATA_DIR, f"gsm8k_cft_{variant_suffix(mode, w)}.jsonl"))
+    ]
+    if variants:
+        preprocess_dataset_cft_variants(
+            data_path=RAW_PATH,
+            variants=variants,
+            workdir=os.path.join(DATA_DIR, "cft_workdir"),
+        )
 
 
 # ============================================================

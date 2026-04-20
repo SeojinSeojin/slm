@@ -20,7 +20,7 @@ import torch.nn.functional as F
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from scoring.context_expansion import expand_mask
+from symbolic_slm.scoring.context_expansion import expand_mask
 
 TRAINING_MODEL_NAME  = "Qwen/Qwen2.5-1.5B"
 REFERENCE_MODEL_NAME = "Qwen/Qwen2.5-Math-7B"

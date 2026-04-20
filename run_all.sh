@@ -53,11 +53,12 @@ echo ""
 echo "[2/4] Python 패키지 설치..."
 
 # Ubuntu 22 + 2080 Ti → CUDA 11.x 계열
-pip install -q \
+pip3 install -q \
     torch torchvision torchaudio \
-    --index-url https://download.pytorch.org/whl/cu118
+    --index-url https://download.pytorch.org/whl/cu118 \
+    --break-system-packages
 
-pip install -q \
+pip3 install -q \
     "transformers>=4.40.0" \
     datasets \
     accelerate \
@@ -66,7 +67,7 @@ pip install -q \
     matplotlib \
     "Pillow>=9.2.0" \
     huggingface_hub \
-    dropbox
+    --break-system-packages
 
 echo "  ✅ Python 패키지 완료"
 

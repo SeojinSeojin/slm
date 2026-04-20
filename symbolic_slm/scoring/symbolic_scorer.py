@@ -9,7 +9,7 @@ import numpy as np
 from transformers import AutoTokenizer
 from tqdm import tqdm
 
-from scoring.context_expansion import expand_mask
+from symbolic_slm.scoring.context_expansion import expand_mask
 
 # ============================================================
 # Token category definitions

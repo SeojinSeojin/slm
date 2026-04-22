@@ -19,12 +19,12 @@ RAW_PATH = os.path.join(DATA_DIR, "gsm8k_train.jsonl")
 # ============================================================
 # CONFIG — toggle as needed
 # ============================================================
-RUN_RHO1   = False
+RUN_RHO1   = True
 RUN_OURS_B = False
 RUN_OURS_A = False
-RUN_OURS_C = True
+RUN_OURS_C = False
 
-RHO1_SELECT_RATIO   = 0.2
+RHO1_SELECT_RATIO   = 0.15
 OURS_A_SELECT_RATIO = 0.20
 OURS_C_GAP_RATIO    = 0.40
 OURS_C_ABS_RATIO    = 0.40

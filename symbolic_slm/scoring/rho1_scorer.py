@@ -154,7 +154,7 @@ def preprocess_dataset_rho1(
     output_path:          str,
     training_model_name:  str   = TRAINING_MODEL_NAME,
     reference_model_name: str   = REFERENCE_MODEL_NAME,
-    select_ratio:         float = 0.77,
+    select_ratio:         float = 0.2,
     context_mode:         str   = None,
     window:               int   = 2,
     max_length:           int   = 512,

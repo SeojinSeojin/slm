@@ -65,6 +65,7 @@ pip3 install -q \
     tqdm \
     numpy \
     matplotlib \
+    bitsandbytes \
     "Pillow>=9.2.0" \
     huggingface_hub #\
     # --break-system-packages

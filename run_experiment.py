@@ -5,10 +5,12 @@
 
 import os, sys, json, gc, torch, shutil
 
+os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
 
-os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
+
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 
 SAVE_DIR  = os.path.join(BASE_DIR, "results")
@@ -21,7 +23,7 @@ os.makedirs(MODEL_DIR, exist_ok=True)
 # CONFIG
 # ============================================================
 CONFIG = {
-    "max_length":        512,
+    "max_length":        384,
     "base_model":        "Qwen/Qwen2.5-1.5B",
 
     "max_steps":         8000,

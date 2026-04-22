@@ -1,6 +1,10 @@
 # train/slm_trainer.py
 
 import os
+
+os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
+
+
 import json
 import torch
 import torch.nn as nn
@@ -11,7 +15,7 @@ from transformers import (
     get_cosine_schedule_with_warmup,
 )
 from tqdm import tqdm
-
+import bitsandbytes as bnb
 
 # ============================================================
 # Dataset
@@ -87,7 +91,6 @@ def _find_answer_boundary(token_ids: list, text: str) -> int:
     if idx == -1:
         return int(len(token_ids) * 0.85)
 
-    # Approximate: map char position to token index via ratio
     ratio    = idx / max(len(text), 1)
     boundary = int(len(token_ids) * ratio)
     return max(0, min(boundary, len(token_ids) - 1))
@@ -179,7 +182,7 @@ class SLMTrainer:
         grad_accum_steps: int   = 4,
         max_steps:        int   = 8000,
         warmup_steps:     int   = 200,
-        max_length:       int   = 512,
+        max_length:       int   = 384,
         log_interval:     int   = 20,
     ):
         self.save_dir         = save_dir
@@ -214,13 +217,13 @@ class SLMTrainer:
 
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            torch_dtype=self.dtype,  # fixed: was `dtype=`
+            torch_dtype=self.dtype,
         ).to(self.device)
 
         self.model.gradient_checkpointing_enable()
         self.model.train()
 
-        self.optimizer = torch.optim.AdamW(
+        self.optimizer = bnb.optim.AdamW8bit(
             self.model.parameters(),
             lr=learning_rate,
             weight_decay=0.1,
@@ -230,6 +233,8 @@ class SLMTrainer:
         print("✅ 준비 완료")
 
     def train(self, dataset: SLMDataset, experiment_name: str) -> str:
+        # 실험 시작 전 캐시 비우기
+        torch.cuda.empty_cache()
 
         dataloader = DataLoader(
             dataset,
@@ -241,7 +246,7 @@ class SLMTrainer:
                 max_length=self.max_length,
             ),
             num_workers=0,
-            pin_memory=(self.device == "cuda"),
+            pin_memory=False,
         )
 
         total_optimizer_steps = self.max_steps // self.grad_accum_steps
@@ -268,7 +273,7 @@ class SLMTrainer:
         optimizer_step = 0
         running_loss   = 0.0
         loss_history   = []
-        self.optimizer.zero_grad()
+        self.optimizer.zero_grad(set_to_none=True)
 
         pbar = tqdm(total=total_optimizer_steps, desc=f"[{experiment_name}]",
                     unit="step", dynamic_ncols=True)
@@ -285,9 +290,10 @@ class SLMTrainer:
 
                 with torch.autocast(device_type=self.device, dtype=self.dtype,
                                     enabled=(self.device == "cuda")):
-                    outputs = self.model(input_ids=input_ids, attention_mask=attn_mask)
-                    loss    = compute_loss(outputs.logits, input_ids, loss_mask, weights)
-                    loss    = loss / self.grad_accum_steps
+                    # outputs 전체 대신 logits만 참조 → 나머지 hidden states 즉시 해제
+                    logits = self.model(input_ids=input_ids, attention_mask=attn_mask).logits
+                    loss   = compute_loss(logits, input_ids, loss_mask, weights)
+                    loss   = loss / self.grad_accum_steps
 
                 self.scaler.scale(loss).backward() if self.use_scaler else loss.backward()
 
@@ -306,7 +312,7 @@ class SLMTrainer:
                         self.optimizer.step()
 
                     scheduler.step()
-                    self.optimizer.zero_grad()
+                    self.optimizer.zero_grad(set_to_none=True)  # gradient tensor 완전 해제
                     optimizer_step += 1
 
                     lr = scheduler.get_last_lr()[0]
@@ -323,6 +329,9 @@ class SLMTrainer:
                         loss_history.append({"step": optimizer_step, "loss": avg_loss})
                         running_loss = 0.0
 
+            # 에폭 끝마다 단편화된 캐시 정리
+            torch.cuda.empty_cache()
+
         pbar.close()
 
         history_path = os.path.join(self.save_dir, f"{experiment_name}_loss.json")
@@ -330,7 +339,6 @@ class SLMTrainer:
             json.dump(loss_history, f, indent=2)
         print(f"  📊 {history_path}")
 
-        # Save final checkpoint once (removed duplicate mid-loop save)
         self._save_checkpoint(experiment_name, optimizer_step, final=True)
         print(f"✅ [{experiment_name}] 완료\n")
         return history_path

@@ -46,18 +46,15 @@ EXPERIMENTS = [
     # (scored_path,                                               exp_name,                        display_name,             ct_mode)
     # ("gsm8k_scored_ct.jsonl",                                    "ct",                            "CT",                     True),
     # ("gsm8k_rho1_base.jsonl",                                    "rho1_base",                     "RHO-1 base",             False),
-    # ("gsm8k_rho1_window_w1.jsonl",                               "rho1_window_w1",                "RHO-1 window_w1",        False),
-    # ("gsm8k_rho1_window_w3.jsonl",                               "rho1_window_w3",                "RHO-1 window_w3",        False),
+    ("gsm8k_rho1_window_w1.jsonl",                               "rho1_window_w1",                "RHO-1 window_w1",        False),
+    ("gsm8k_rho1_window_w3.jsonl",                               "rho1_window_w3",                "RHO-1 window_w3",        False),
     # ("gsm8k_rho1_span_w1.jsonl",                                 "rho1_span_w1",                  "RHO-1 span_w1",          False),
-    # ("gsm8k_rho1_span_w3.jsonl",                                 "rho1_span_w3",                  "RHO-1 span_w3",          False),
-    ("gsm8k_symbolic_window_w1.jsonl",                           "symbolic_window_w1",            "Ours-B window_w1",       False),
-    ("gsm8k_symbolic_window_w3.jsonl",                           "symbolic_window_w3",            "Ours-B window_w3",       False),
-    ("gsm8k_symbolic_span_w1.jsonl",                             "symbolic_span_w1",              "Ours-B span_w1",         False),
-    ("gsm8k_symbolic_span_w3.jsonl",                             "symbolic_span_w3",              "Ours-B span_w3",         False),
-    ("gsm8k_entropy_gap_window_w1.jsonl",                        "entropy_gap_window_w1",         "Ours-A window_w1",       False),
-    ("gsm8k_entropy_gap_window_w3.jsonl",                        "entropy_gap_window_w3",         "Ours-A window_w3",       False),
-    ("gsm8k_entropy_gap_span_w1.jsonl",                          "entropy_gap_span_w1",           "Ours-A span_w1",         False),
-    ("gsm8k_entropy_gap_span_w3.jsonl",                          "entropy_gap_span_w3",           "Ours-A span_w3",         False),
+    # ("gsm8k_symbolic_window_w1.jsonl",                           "symbolic_window_w1",            "Ours-B window_w1",       False),
+    # ("gsm8k_symbolic_window_w3.jsonl",                           "symbolic_window_w3",            "Ours-B window_w3",       False),
+    # ("gsm8k_symbolic_span_w1.jsonl",                             "symbolic_span_w1",              "Ours-B span_w1",         False),
+    # ("gsm8k_entropy_gap_window_w1.jsonl",                        "entropy_gap_window_w1",         "Ours-A window_w1",       False),
+    # ("gsm8k_entropy_gap_window_w3.jsonl",                        "entropy_gap_window_w3",         "Ours-A window_w3",       False),
+    # ("gsm8k_entropy_gap_span_w1.jsonl",                          "entropy_gap_span_w1",           "Ours-A span_w1",         False),
 ]
 
 print("=" * 60)

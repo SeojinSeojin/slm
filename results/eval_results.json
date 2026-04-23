@@ -71,5 +71,22 @@
     "svamp_correct": 137,
     "svamp_total": 200,
     "avg_accuracy": 52.5
+  },
+  {
+    "experiment": "Ours-B span_w1",
+    "model_path": "/home/skim253/slm/results/models/symbolic_span_w1_final",
+    "gsm8k_accuracy": 17.5,
+    "gsm8k_correct": 35,
+    "gsm8k_total": 200,
+    "math_accuracy": 5.0,
+    "math_correct": 10,
+    "math_total": 200,
+    "asdiv_accuracy": 9.0,
+    "asdiv_correct": 18,
+    "asdiv_total": 200,
+    "svamp_accuracy": 2.0,
+    "svamp_correct": 4,
+    "svamp_total": 200,
+    "avg_accuracy": 8.375
   }
 ]

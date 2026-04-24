@@ -139,5 +139,22 @@
     "svamp_correct": 140,
     "svamp_total": 200,
     "avg_accuracy": 55.125
+  },
+  {
+    "experiment": "RHO-1 window_w3",
+    "model_path": "/home/skim253/slm/results/models/rho1_window_w3_final",
+    "gsm8k_accuracy": 63.0,
+    "gsm8k_correct": 126,
+    "gsm8k_total": 200,
+    "math_accuracy": 12.5,
+    "math_correct": 25,
+    "math_total": 200,
+    "asdiv_accuracy": 85.0,
+    "asdiv_correct": 170,
+    "asdiv_total": 200,
+    "svamp_accuracy": 70.0,
+    "svamp_correct": 140,
+    "svamp_total": 200,
+    "avg_accuracy": 57.625
   }
 ]

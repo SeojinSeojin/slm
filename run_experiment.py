@@ -14,7 +14,7 @@ sys.path.insert(0, BASE_DIR)
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 
 SAVE_DIR  = os.path.join(BASE_DIR, "results")
-DATA_DIR  = os.path.join(SAVE_DIR, "data")
+DATA_DIR  = os.path.join(SAVE_DIR, "data_fixed")
 MODEL_DIR = os.path.join(SAVE_DIR, "models")
 os.makedirs(DATA_DIR,  exist_ok=True)
 os.makedirs(MODEL_DIR, exist_ok=True)
@@ -53,18 +53,18 @@ EXPERIMENTS = [
     ("gsm8k_entropy_gap_window_w1_015.jsonl",    "entropy_gap_window_w1","Ours-A window_w1",   False),
     ("gsm8k_symbolic_window_w1.jsonl",          "symbolic_window_w1",   "Ours-B window_w1",   False),
 
-    # window_w3 group (~60%)
-    ("gsm8k_rho1_window_w3_015.jsonl",           "rho1_window_w3",       "RHO-1 window_w3",    False),
-    ("gsm8k_entropy_gap_window_w3_015.jsonl",    "entropy_gap_window_w3","Ours-A window_w3",   False),
-    ("gsm8k_symbolic_window_w3.jsonl",           "symbolic_window_w3",   "Ours-B window_w3",   False),
+    # # window_w3 group (~60%)
+    # ("gsm8k_rho1_window_w3_015.jsonl",           "rho1_window_w3",       "RHO-1 window_w3",    False),
+    # ("gsm8k_entropy_gap_window_w3_015.jsonl",    "entropy_gap_window_w3","Ours-A window_w3",   False),
+    # ("gsm8k_symbolic_window_w3.jsonl",           "symbolic_window_w3",   "Ours-B window_w3",   False),
 
-    # span_w1 group (~70-73%)
-    ("gsm8k_rho1_span_w1_015.jsonl",             "rho1_span_w1",         "RHO-1 span_w1",      False),
-    ("gsm8k_symbolic_span_w1.jsonl",             "symbolic_span_w1",     "Ours-B span_w1",     False),
-    ("gsm8k_entropy_gap_span_w1_015.jsonl",      "entropy_gap_span_w1",  "Ours-A span_w1",     False),
+    # # span_w1 group (~70-73%)
+    # ("gsm8k_rho1_span_w1_015.jsonl",             "rho1_span_w1",         "RHO-1 span_w1",      False),
+    # ("gsm8k_symbolic_span_w1.jsonl",             "symbolic_span_w1",     "Ours-B span_w1",     False),
+    # ("gsm8k_entropy_gap_span_w1_015.jsonl",      "entropy_gap_span_w1",  "Ours-A span_w1",     False),
 
-    # baselines
-    ("gsm8k_scored_ct.jsonl",                    "ct",                   "CT",                 True),
+    # # baselines
+    # ("gsm8k_scored_ct.jsonl",                    "ct",                   "CT",                 True),
 ]
 
 print("=" * 60)

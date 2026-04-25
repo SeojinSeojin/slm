@@ -1,6 +1,5 @@
 # eval/evaluate.py
 # GSM8K + MATH + ASDiv + SVAMP evaluation
-# Each problem's result is saved for per-problem analysis
 
 import re
 import os
@@ -76,26 +75,28 @@ Answer:"""
 
 
 # ============================================================
-# Answer extraction & normalization
+# Answer extraction
 # ============================================================
 
 def extract_answer_gsm8k(text: str) -> str:
-    match = re.search(r"[Tt]he answer is\s*([\-\d,\.]+)", text)
+    # "The answer is $X" or "The answer is X" — $ 있어도 처리
+    match = re.search(r"[Tt]he answer is\s*\$?\s*([\-\d,\.]+)", text)
     if match:
         return match.group(1).replace(",", "").strip()
+    # #### 패턴
     match = re.search(r"####\s*([\-\d,\.]+)", text)
     if match:
         return match.group(1).replace(",", "").strip()
-    numbers = re.findall(r"[\-]?\d+\.?\d*", text)
-    return numbers[-1] if numbers else ""
+    # 위 두 패턴 모두 실패하면 빈 문자열 반환
+    # 기존엔 마지막 숫자를 fallback으로 뽑았는데,
+    # 모델이 헛소리를 길게 생성하면 엉뚱한 숫자가 뽑히는 문제가 있었음
+    return ""
 
 
 def extract_answer_math(text: str) -> str:
     """Extract answer from MATH-style output. Handles nested braces in \\boxed{}."""
-    # Normalize \dfrac, \tfrac → \frac
     text = re.sub(r"\\[dt]frac", r"\\frac", text)
 
-    # Find \boxed{ and extract content handling nested braces
     idx = text.find("\\boxed{")
     if idx != -1:
         start = idx + len("\\boxed{")
@@ -110,28 +111,21 @@ def extract_answer_math(text: str) -> str:
         if depth == 0:
             return text[start:i-1].strip()
 
-    # "The answer is X" — capture full expression
     m = re.search(r"[Tt]he answer is\s*\$?([^\n$]+)\$?", text)
     if m:
         return m.group(1).strip().rstrip(".")
 
-    # Last \frac{a}{b} expression
     fracs = list(re.finditer(r"\\frac\{[^{}]+\}\{[^{}]+\}", text))
     if fracs:
         return fracs[-1].group(0).strip()
 
-    # Last number
+    # FIX: 기존과 동일하게 마지막 숫자 fallback 유지 (MATH는 숫자 외 표현이 많아서 필요)
     numbers = re.findall(r"[\-]?\d+\.?\d*", text)
     return numbers[-1] if numbers else ""
 
 
 def extract_answer_svamp(text: str) -> str:
-    """
-    SVAMP extraction: prefer the FIRST #### answer.
-    Base model tends to repeat few-shot examples after answering,
-    so we take the first occurrence rather than the last number.
-    """
-    # First #### pattern
+    # #### 패턴
     match = re.search(r"####\s*([\-\d,\.]+)", text)
     if match:
         return match.group(1).replace(",", "").strip()
@@ -139,71 +133,36 @@ def extract_answer_svamp(text: str) -> str:
     match = re.search(r"[Tt]he answer is\s*([\-\d,\.]+)", text)
     if match:
         return match.group(1).replace(",", "").strip()
-    # First number in text (not last — avoids repeated few-shot contamination)
+    # FIX: 기존 코드에 return 뒤 dead code(try 블록)가 있었음 — 제거
+    # base model이 few-shot 예시를 반복하는 경향이 있어서 첫 번째 숫자 사용
     numbers = re.findall(r"[\-]?\d+\.?\d*", text)
     return numbers[0] if numbers else ""
-    try:
-        # Normalize floats: 6.0 == 6
-        if float(ans) == int(float(ans)):
-            return str(int(float(ans)))
-        return str(round(float(ans), 4))
-    except Exception:
-        return ans.replace(",", "").replace(" ", "").lower().strip()
 
 
 def normalize_answer(s: str) -> str:
-    """
-    Normalize answer string for comparison.
-    Handles: plain numbers, fractions, LaTeX fractions, intervals,
-             sets, symbolic expressions, union/intersection notation.
-    """
     if not s:
         return ""
 
-    import re as _re
-
     s = s.strip()
-
-    # Remove dollar signs
     s = s.replace("$", "").strip()
 
-    # Normalize \boxed{} — extract content if present
-    m = _re.search(r"\\boxed\{([^}]*)\}", s)
+    m = re.search(r"\\boxed\{([^}]*)\}", s)
     if m:
         s = m.group(1).strip()
 
-    # Normalize union/intersection notation
     s = s.replace("\\cup", "U").replace("\\cap", "N")
     s = s.replace("∪", "U").replace("∩", "N")
-
-    # Normalize \infty
     s = s.replace("\\infty", "inf").replace("∞", "inf")
-
-    # Normalize \pi
     s = s.replace("\\pi", "pi")
-
-    # LaTeX \frac{a}{b} → (a)/(b)
-    s = _re.sub(r"\\[dt]?frac\{([^}]+)\}\{([^}]+)\}", r"(\1)/(\2)", s)
-
-    # LaTeX \sqrt{a} → sqrt(a)
-    s = _re.sub(r"\\sqrt\{([^}]+)\}", r"sqrt(\1)", s)
-    s = _re.sub(r"\\sqrt\s+(\S+)", r"sqrt(\1)", s)
-
-    # Remove remaining LaTeX commands (e.g. \cdot → *, \times → *)
+    s = re.sub(r"\\[dt]?frac\{([^}]+)\}\{([^}]+)\}", r"(\1)/(\2)", s)
+    s = re.sub(r"\\sqrt\{([^}]+)\}", r"sqrt(\1)", s)
+    s = re.sub(r"\\sqrt\s+(\S+)", r"sqrt(\1)", s)
     s = s.replace("\\cdot", "*").replace("\\times", "*")
-    s = _re.sub(r"\\[a-zA-Z]+", "", s)
-
-    # Remove braces (but keep parentheses/brackets for intervals)
+    s = re.sub(r"\\[a-zA-Z]+", "", s)
     s = s.replace("{", "").replace("}", "")
-
-    # Normalize spaces
     s = s.replace(" ", "")
 
-    # --------------------------------------------------------
-    # Try to evaluate as a numeric expression
-    # --------------------------------------------------------
-    # Simple fraction: (a)/(b) or a/b
-    frac_match = _re.match(r"^\(?(-?\d+\.?\d*)\)?/\(?(-?\d+\.?\d*)\)?$", s)
+    frac_match = re.match(r"^\(?(-?\d+\.?\d*)\)?/\(?(-?\d+\.?\d*)\)?$", s)
     if frac_match:
         try:
             val = float(frac_match.group(1)) / float(frac_match.group(2))
@@ -211,31 +170,20 @@ def normalize_answer(s: str) -> str:
         except Exception:
             pass
 
-    # Plain number
     try:
         val = float(s.replace(",", ""))
         return str(int(val)) if val == int(val) else str(round(val, 6))
     except Exception:
         pass
 
-    # --------------------------------------------------------
-    # Interval normalization: (-inf,-2)U(-2,3)U(3,inf)
-    # Standardize bracket styles and spacing
-    # --------------------------------------------------------
     if "U" in s or "N" in s or "(" in s or "[" in s:
-        # Normalize negative sign in intervals
         s = s.replace("−", "-")
-        # Normalize inf representations
         s = s.replace("infty", "inf").replace("infinity", "inf")
         return s.lower()
 
-    # --------------------------------------------------------
-    # Symbolic: 2b, x+1, etc. — lowercase string comparison
-    # --------------------------------------------------------
     return s.lower()
 
 
-# Alias
 normalize_number = normalize_answer
 
 
@@ -281,32 +229,32 @@ def evaluate_gsm8k(
     per_problem = []
 
     for item in tqdm(dataset):
-        question    = item["question"]
-        gold        = item["answer"].split("####")[-1].strip().replace(",", "")
-        prompt      = GSM8K_FEWSHOT.format(question=question)
-        generated   = generate_answer(model, tokenizer, prompt, max_new_tokens, device)
-        pred        = extract_answer_gsm8k(generated)
-        is_correct  = normalize_answer(pred) == normalize_answer(gold)
+        question   = item["question"]
+        gold       = item["answer"].split("####")[-1].strip().replace(",", "")
+        prompt     = GSM8K_FEWSHOT.format(question=question)
+        generated  = generate_answer(model, tokenizer, prompt, max_new_tokens, device)
+        pred       = extract_answer_gsm8k(generated)
+        is_correct = normalize_answer(pred) == normalize_answer(gold)
 
         if is_correct:
             correct += 1
         total += 1
 
         per_problem.append({
-            "question": question,
-            "gold":     gold,
-            "pred":     pred,
-            "correct":  is_correct,
+            "question":  question,
+            "gold":      gold,
+            "pred":      pred,
+            "correct":   is_correct,
             "generated": generated,
         })
 
     accuracy = correct / total * 100
     print(f"  GSM8K: {correct}/{total} = {accuracy:.1f}%")
     return {
-        "gsm8k_accuracy": accuracy,
-        "gsm8k_correct":  correct,
-        "gsm8k_total":    total,
-        "gsm8k_per_problem": per_problem,
+        "gsm8k_accuracy":     accuracy,
+        "gsm8k_correct":      correct,
+        "gsm8k_total":        total,
+        "gsm8k_per_problem":  per_problem,
     }
 
 
@@ -319,14 +267,14 @@ def evaluate_math(
     model,
     tokenizer,
     n_samples:      int = 200,
-    max_new_tokens: int = 256,
+    max_new_tokens: int = 512,  # FIX: 256 → 512 (LaTeX 수식 생성에 공간 더 필요)
     device:         str = "cuda",
 ) -> dict:
     print(f"\n📊 MATH-Hard evaluation ({n_samples} samples)...")
     dataset = None
     for path, config, split in [
-        ("lighteval/MATH-Hard",         None,   "test"),
-        ("EleutherAI/hendrycks_math",   "all",  "test"),
+        ("lighteval/MATH-Hard",       None,  "test"),
+        ("EleutherAI/hendrycks_math", "all", "test"),
     ]:
         try:
             dataset = load_dataset(path, config, split=split) if config \
@@ -347,18 +295,17 @@ def evaluate_math(
     per_problem = []
 
     for item in tqdm(dataset):
-        problem    = item.get("problem", item.get("question", ""))
-        solution   = item.get("solution", item.get("answer", ""))
-        gold       = extract_answer_math(solution)
+        problem   = item.get("problem", item.get("question", ""))
+        solution  = item.get("solution", item.get("answer", ""))
+        gold      = extract_answer_math(solution)
         if not gold:
             continue
 
-        prompt     = MATH_FEWSHOT.replace("{problem}", problem)
-        generated  = generate_answer(model, tokenizer, prompt, max_new_tokens, device)
-        # Use gsm8k extractor since prompt now follows "The answer is X" format
-        pred       = extract_answer_gsm8k(generated)
+        prompt    = MATH_FEWSHOT.replace("{problem}", problem)
+        generated = generate_answer(model, tokenizer, prompt, max_new_tokens, device)
+        pred      = extract_answer_gsm8k(generated)
         if not pred:
-            pred = extract_answer_math(generated)  # fallback to \boxed{}
+            pred = extract_answer_math(generated)
         is_correct = normalize_answer(pred) == normalize_answer(gold)
 
         if is_correct:
@@ -376,10 +323,10 @@ def evaluate_math(
     accuracy = correct / total * 100 if total > 0 else 0.0
     print(f"  MATH: {correct}/{total} = {accuracy:.1f}%")
     return {
-        "math_accuracy":     accuracy,
-        "math_correct":      correct,
-        "math_total":        total,
-        "math_per_problem":  per_problem,
+        "math_accuracy":    accuracy,
+        "math_correct":     correct,
+        "math_total":       total,
+        "math_per_problem": per_problem,
     }
 
 
@@ -395,7 +342,6 @@ def evaluate_asdiv(
     max_new_tokens: int = 256,
     device:         str = "cuda",
 ) -> dict:
-    """ASDiv - diverse arithmetic word problems"""
     print(f"\n📊 ASDiv evaluation ({n_samples} samples)...")
     try:
         dataset = load_dataset("EleutherAI/asdiv", split="validation")
@@ -411,7 +357,6 @@ def evaluate_asdiv(
 
     for item in tqdm(dataset):
         question   = item["body"] + " " + item["question"]
-        # ASDiv answer format: "9 (apples)" → extract number before parenthesis
         raw_answer = str(item["answer"]).split("(")[0].strip().replace(",", "")
         gold       = normalize_number(raw_answer)
 
@@ -435,10 +380,10 @@ def evaluate_asdiv(
     accuracy = correct / total * 100 if total > 0 else 0.0
     print(f"  ASDiv: {correct}/{total} = {accuracy:.1f}%")
     return {
-        "asdiv_accuracy":     accuracy,
-        "asdiv_correct":      correct,
-        "asdiv_total":        total,
-        "asdiv_per_problem":  per_problem,
+        "asdiv_accuracy":    accuracy,
+        "asdiv_correct":     correct,
+        "asdiv_total":       total,
+        "asdiv_per_problem": per_problem,
     }
 
 
@@ -454,7 +399,6 @@ def evaluate_svamp(
     max_new_tokens: int = 128,
     device:         str = "cuda",
 ) -> dict:
-    """SVAMP - robustness benchmark for arithmetic word problems"""
     print(f"\n📊 SVAMP evaluation ({n_samples} samples)...")
     try:
         dataset = load_dataset("ChilleD/SVAMP", split="train")
@@ -491,10 +435,10 @@ def evaluate_svamp(
     accuracy = correct / total * 100 if total > 0 else 0.0
     print(f"  SVAMP: {correct}/{total} = {accuracy:.1f}%")
     return {
-        "svamp_accuracy":     accuracy,
-        "svamp_correct":      correct,
-        "svamp_total":        total,
-        "svamp_per_problem":  per_problem,
+        "svamp_accuracy":    accuracy,
+        "svamp_correct":     correct,
+        "svamp_total":       total,
+        "svamp_per_problem": per_problem,
     }
 
 
@@ -520,16 +464,17 @@ def run_evaluation(
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
+    # FIX: dtype= → torch_dtype= (오타로 인해 float32로 로딩되던 문제)
     model = AutoModelForCausalLM.from_pretrained(
         model_path,
-        dtype=torch.float16,
+        torch_dtype=torch.float16,
         device_map="auto",
     ).eval()
 
     gsm8k_result = evaluate_gsm8k(model, tokenizer, n_samples=gsm8k_samples, device=device) \
         if gsm8k_samples > 0 else {"gsm8k_accuracy": 0.0, "gsm8k_correct": 0, "gsm8k_total": 0, "gsm8k_per_problem": []}
     math_result  = evaluate_math(model,  tokenizer, n_samples=math_samples,  device=device) \
-        if math_samples > 0  else {"math_accuracy":  0.0, "math_correct":  0, "math_total":  0, "math_per_problem":  []}
+        if math_samples  > 0 else {"math_accuracy":  0.0, "math_correct":  0, "math_total":  0, "math_per_problem":  []}
 
     result = {
         "experiment": experiment_name,
@@ -546,7 +491,6 @@ def run_evaluation(
         svamp_result = evaluate_svamp(model, tokenizer, n_samples=svamp_samples, device=device)
         result.update({k: v for k, v in svamp_result.items() if "per_problem" not in k})
 
-    # Average across all benchmarks
     acc_keys = [k for k in result if k.endswith("_accuracy")]
     result["avg_accuracy"] = sum(result[k] for k in acc_keys) / len(acc_keys)
 
@@ -558,32 +502,29 @@ def run_evaluation(
     print(f"  Avg: {result['avg_accuracy']:.1f}%")
     print(f"{'='*50}")
 
-    # Save per-problem details — merge with existing to preserve skipped benchmarks
     detail_dir = os.path.join(os.path.dirname(results_path), "per_problem")
     os.makedirs(detail_dir, exist_ok=True)
     detail_path = os.path.join(detail_dir, f"{experiment_name}.json")
 
-    # Load existing details if any
     if os.path.exists(detail_path):
         with open(detail_path) as f:
             details = json.load(f)
     else:
         details = {"experiment": experiment_name}
 
-    # Only overwrite benchmarks that were actually run
     if gsm8k_samples > 0:
         details["gsm8k"] = gsm8k_result.get("gsm8k_per_problem", [])
     if math_samples > 0:
-        details["math"] = math_result.get("math_per_problem", [])
+        details["math"]  = math_result.get("math_per_problem", [])
     if run_asdiv:
         details["asdiv"] = asdiv_result.get("asdiv_per_problem", [])
     if run_svamp:
         details["svamp"] = svamp_result.get("svamp_per_problem", [])
+
     with open(detail_path, "w") as f:
         json.dump(details, f, indent=2, ensure_ascii=False)
     print(f"  Per-problem details: {detail_path}")
 
-    # Save summary — merge with existing entry to preserve skipped benchmarks
     existing = []
     if os.path.exists(results_path):
         with open(results_path) as f:

@@ -55,8 +55,8 @@ echo "[2/4] Python 패키지 설치..."
 # Ubuntu 22 + 2080 Ti → CUDA 11.x 계열
 pip3 install -q \
     torch torchvision torchaudio \
-    --index-url https://download.pytorch.org/whl/cu118 #\
-    # --break-system-packages
+    --index-url https://download.pytorch.org/whl/cu118 \
+    --break-system-packages
 
 pip3 install -q \
     "transformers>=4.40.0" \
@@ -67,8 +67,8 @@ pip3 install -q \
     matplotlib \
     bitsandbytes \
     "Pillow>=9.2.0" \
-    huggingface_hub #\
-    # --break-system-packages
+    huggingface_hub \
+    --break-system-packages
 
 echo "  ✅ Python 패키지 완료"
 

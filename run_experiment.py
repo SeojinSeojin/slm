@@ -26,20 +26,20 @@ CONFIG = {
     "max_length":        384,
     "base_model":        "Qwen/Qwen2.5-1.5B",
 
-    "max_steps":         8000,
+    "max_steps":         32000,
     "batch_size":        1,
     "grad_accum_steps":  32,
     "learning_rate":     5e-5,
     "warmup_steps":      25,
     "log_interval":      10,
 
-    "gsm8k_samples":     200,
-    "math_samples":      200,
-    "asdiv_samples":     200,
-    "svamp_samples":     200,
+    "gsm8k_samples":     100,
+    "math_samples":      100,
+    "asdiv_samples":     100,
+    "svamp_samples":     100,
 
-    "run_base": False,
-    "run_ct":   False,
+    "run_base": True,
+    "run_ct":   True,
 }
 
 # scored 파일 → (experiment_name, display_name) 매핑
@@ -47,16 +47,24 @@ CONFIG = {
 EXPERIMENTS = [
     # (scored_path,                                               exp_name,                        display_name,             ct_mode)
     # ("gsm8k_scored_ct.jsonl",                                    "ct",                            "CT",                     True),
-    # ("gsm8k_rho1_base.jsonl",                                    "rho1_base",                     "RHO-1 base",             False),
-    ("gsm8k_rho1_window_w1.jsonl",                               "rho1_window_w1",                "RHO-1 window_w1",        False),
-    ("gsm8k_rho1_window_w3.jsonl",                               "rho1_window_w3",                "RHO-1 window_w3",        False),
-    # ("gsm8k_rho1_span_w1.jsonl",                                 "rho1_span_w1",                  "RHO-1 span_w1",          False),
-    # ("gsm8k_symbolic_window_w1.jsonl",                           "symbolic_window_w1",            "Ours-B window_w1",       False),
-    # ("gsm8k_symbolic_window_w3.jsonl",                           "symbolic_window_w3",            "Ours-B window_w3",       False),
-    # ("gsm8k_symbolic_span_w1.jsonl",                             "symbolic_span_w1",              "Ours-B span_w1",         False),
-    # ("gsm8k_entropy_gap_window_w1.jsonl",                        "entropy_gap_window_w1",         "Ours-A window_w1",       False),
-    # ("gsm8k_entropy_gap_window_w3.jsonl",                        "entropy_gap_window_w3",         "Ours-A window_w3",       False),
-    # ("gsm8k_entropy_gap_span_w1.jsonl",                          "entropy_gap_span_w1",           "Ours-A span_w1",         False),
+    
+    # window_w1 group (~36%)
+    ("gsm8k_rho1_window_w1_015.jsonl",          "rho1_window_w1",       "RHO-1 window_w1",    False),
+    ("gsm8k_entropy_gap_window_w1_015.jsonl",    "entropy_gap_window_w1","Ours-A window_w1",   False),
+    ("gsm8k_symbolic_window_w1.jsonl",          "symbolic_window_w1",   "Ours-B window_w1",   False),
+
+    # window_w3 group (~60%)
+    ("gsm8k_rho1_window_w3_015.jsonl",           "rho1_window_w3",       "RHO-1 window_w3",    False),
+    ("gsm8k_entropy_gap_window_w3_015.jsonl",    "entropy_gap_window_w3","Ours-A window_w3",   False),
+    ("gsm8k_symbolic_window_w3.jsonl",           "symbolic_window_w3",   "Ours-B window_w3",   False),
+
+    # span_w1 group (~70-73%)
+    ("gsm8k_rho1_span_w1_015.jsonl",             "rho1_span_w1",         "RHO-1 span_w1",      False),
+    ("gsm8k_symbolic_span_w1.jsonl",             "symbolic_span_w1",     "Ours-B span_w1",     False),
+    ("gsm8k_entropy_gap_span_w1_015.jsonl",      "entropy_gap_span_w1",  "Ours-A span_w1",     False),
+
+    # baselines
+    ("gsm8k_scored_ct.jsonl",                    "ct",                   "CT",                 True),
 ]
 
 print("=" * 60)

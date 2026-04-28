@@ -26,10 +26,10 @@ CONFIG = {
     "max_length":        384,
     "base_model":        "Qwen/Qwen2.5-1.5B",
 
-    "max_steps":         32000,
+    "max_steps":         16000,
     "batch_size":        1,
     "grad_accum_steps":  32,
-    "learning_rate":     5e-5,
+    "learning_rate":     2e-5,
     "warmup_steps":      25,
     "log_interval":      10,
 

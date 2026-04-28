@@ -15,7 +15,7 @@ from transformers import (
     get_cosine_schedule_with_warmup,
 )
 from tqdm import tqdm
-import bitsandbytes as bnb
+from torch.optim import AdamW
 
 # ============================================================
 # Dataset
@@ -223,7 +223,7 @@ class SLMTrainer:
         self.model.gradient_checkpointing_enable()
         self.model.train()
 
-        self.optimizer = bnb.optim.AdamW8bit(
+        self.optimizer = torch.optim.AdamW(
             self.model.parameters(),
             lr=learning_rate,
             weight_decay=0.1,

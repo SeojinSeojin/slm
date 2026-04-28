@@ -14,62 +14,88 @@ from tqdm import tqdm
 # ============================================================
 
 GSM8K_FEWSHOT = """Question: There are 15 trees in the grove. Grove workers will plant trees in the grove today. After they are done, there will be 21 trees. How many trees did the grove workers plant today?
-Answer: There are 15 trees originally. Then there were 21 trees after some more were planted. So there must have been 21 - 15 = 6. The answer is 6.
-
+Answer: There were 21 - 15 = <<21-15=6>>6 trees planted.
+#### 6
+ 
 Question: If there are 3 cars in the parking lot and 2 more cars arrive, how many cars are in the parking lot?
-Answer: There are originally 3 cars. 2 more cars arrive. 3 + 2 = 5. The answer is 5.
-
+Answer: 3 + 2 = <<3+2=5>>5 cars are in the parking lot.
+#### 5
+ 
 Question: Leah had 32 chocolates and her sister had 42. If they ate 35, how many pieces do they have left in total?
-Answer: Originally, Leah had 32 chocolates. Her sister had 42. So in total they had 32 + 42 = 74. After eating 35, they had 74 - 35 = 39. The answer is 39.
-
+Answer: Leah and her sister had 32 + 42 = <<32+42=74>>74 chocolates in total.
+After eating 35, they had 74 - 35 = <<74-35=39>>39 chocolates left.
+#### 39
+ 
 Question: Jason had 20 lollipops. He gave Denny some lollipops. Now Jason has 12 lollipops. How many lollipops did Jason give Denny?
-Answer: Jason started with 20 lollipops. Then he had 12 after giving some to Denny. So he gave Denny 20 - 12 = 8. The answer is 8.
-
+Answer: Jason gave Denny 20 - 12 = <<20-12=8>>8 lollipops.
+#### 8
+ 
 Question: Shawn has five toys. For Christmas, he got two toys each from his mom and dad. How many toys does he have now?
-Answer: Shawn started with 5 toys. If he got 2 toys each from his mom and dad, then that is 4 more toys. 5 + 4 = 9. The answer is 9.
-
+Answer: Shawn got 2 * 2 = <<2*2=4>>4 toys for Christmas.
+He now has 5 + 4 = <<5+4=9>>9 toys.
+#### 9
+ 
 Question: {question}
 Answer:"""
+ 
+MATH_FEWSHOT = """Question: What is the value of $x$ if $3x - 7 = 2x + 5$?
+Answer: Move x terms to one side: 3x - 2x = 5 + 7
+x = <<5+7=12>>12
+#### 12
 
-MATH_FEWSHOT = """Question: What is the value of $x$ if $2x + 3 = 11$?
-Answer: Subtract 3 from both sides: $2x = 8$. Divide by 2: $x = 4$. The answer is 4.
+Question: A rectangle has perimeter 30 and its length is twice its width. What is its area?
+Answer: Let width = w, then length = 2w.
+Perimeter: 2*(w + 2w) = 30
+6w = 30, so w = <<30/6=5>>5
+Length = 2 * 5 = <<2*5=10>>10
+Area = 10 * 5 = <<10*5=50>>50
+#### 50
 
-Question: A rectangle has length 8 and width 5. What is its area?
-Answer: Area = length times width = $8 \\times 5 = 40$. The answer is 40.
-
-Question: If $f(x) = x^2 + 2x + 1$, what is $f(3)$?
-Answer: $f(3) = 3^2 + 2(3) + 1 = 9 + 6 + 1 = 16$. The answer is 16.
+Question: How many ways can 3 students be chosen from a group of 7?
+Answer: This is a combination: C(7,3) = 7! / (3! * 4!)
+= (7 * 6 * 5) / (3 * 2 * 1)
+= <<7*6*5=210>>210 / <<3*2*1=6>>6
+= <<210/6=35>>35
+#### 35
 
 Question: {problem}
 Answer:"""
-
+ 
 ASDIV_FEWSHOT = """Question: Seven red apples and two green apples are in the basket. How many apples are in the basket?
-Answer: 7 + 2 = 9. The answer is 9.
-
+Answer: 7 + 2 = <<7+2=9>>9 apples are in the basket.
+#### 9
+ 
 Question: Ellen has six more balls than Marin. Marin has nine balls. How many balls does Ellen have?
-Answer: 9 + 6 = 15. The answer is 15.
-
+Answer: 9 + 6 = <<9+6=15>>15 balls.
+#### 15
+ 
 Question: There are 18 students in a class and 6 sit in each row. How many rows are there?
-Answer: 18 / 6 = 3. The answer is 3.
-
+Answer: 18 / 6 = <<18/6=3>>3 rows.
+#### 3
+ 
 Question: A box has 4 rows of 5 chocolates each. How many chocolates are there in total?
-Answer: 4 x 5 = 20. The answer is 20.
-
+Answer: 4 * 5 = <<4*5=20>>20 chocolates.
+#### 20
+ 
 Question: {question}
 Answer:"""
-
+ 
 SVAMP_FEWSHOT = """Question: There are 15 trees in the grove and workers planted 6 more. How many trees are there now?
-Answer: 15 + 6 = 21. The answer is 21.
-
+Answer: 15 + 6 = <<15+6=21>>21 trees.
+#### 21
+ 
 Question: Sara had 10 apples and ate 3. How many apples does she have left?
-Answer: 10 - 3 = 7. The answer is 7.
-
+Answer: 10 - 3 = <<10-3=7>>7 apples.
+#### 7
+ 
 Question: A bag has 4 groups of 5 candies each. How many candies are there in total?
-Answer: 4 x 5 = 20. The answer is 20.
-
+Answer: 4 * 5 = <<4*5=20>>20 candies.
+#### 20
+ 
 Question: 24 students are divided equally into 6 groups. How many students are in each group?
-Answer: 24 / 6 = 4. The answer is 4.
-
+Answer: 24 / 6 = <<24/6=4>>4 students per group.
+#### 4
+ 
 Question: {question}
 Answer:"""
 

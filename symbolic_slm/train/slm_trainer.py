@@ -218,7 +218,8 @@ class SLMTrainer:
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
             torch_dtype=self.dtype,
-        ).to(self.device)
+            device_map="auto"
+        )
 
         self.model.gradient_checkpointing_enable()
         self.model.train()

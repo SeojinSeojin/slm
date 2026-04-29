@@ -117,5 +117,22 @@
     "svamp_correct": 33,
     "svamp_total": 50,
     "avg_accuracy": 57.5
+  },
+  {
+    "experiment": "Ours-B window_w3",
+    "model_path": "/teamspace/studios/this_studio/slm/results/models/symbolic_window_w3_final",
+    "gsm8k_accuracy": 57.99999999999999,
+    "gsm8k_correct": 29,
+    "gsm8k_total": 50,
+    "math_accuracy": 8.0,
+    "math_correct": 4,
+    "math_total": 50,
+    "asdiv_accuracy": 94.0,
+    "asdiv_correct": 47,
+    "asdiv_total": 50,
+    "svamp_accuracy": 70.0,
+    "svamp_correct": 35,
+    "svamp_total": 50,
+    "avg_accuracy": 57.5
   }
 ]

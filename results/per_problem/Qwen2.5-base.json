@@ -419,8 +419,8 @@
     {
       "problem": "Evaluate the infinite geometric series: $$1-\\frac{2}{7}+\\frac{4}{49}-\\frac{8}{343}+\\dots$$",
       "gold": "\\frac{7}{9}",
-      "pred": "7",
-      "correct": false,
+      "pred": "7/9",
+      "correct": true,
       "generated": " The first term is 1, and the common ratio is -2/7.\nThe sum of an infinite geometric series is given by S = a / (1 - r), where a is the first term and r is the common ratio.\nS = 1 / (1 - (-2/7))\nS = 1 / (1 + 2/7)\nS = 1 / (9/7)\nS = 7/9\n#### 7/9"
     },
     {
@@ -531,8 +531,8 @@
     {
       "problem": "If $f(x)=5x-12$, find a value for $x$ so that $f^{-1}(x)=f(x+1)$.",
       "gold": "\\frac{47}{24}",
-      "pred": "2",
-      "correct": false,
+      "pred": "\\frac{47}{24}",
+      "correct": true,
       "generated": " $f^{-1}(x)=\\frac{x+12}{5}$\n$f(x+1)=5(x+1)-12=5x-7$\n$\\frac{x+12}{5}=5x-7$\n$x+12=25x-35$\n$24x=47$\n$x=\\frac{47}{24}$\n#### \\frac{47}{24}\n\nQuestion: What is the value of $x$ if $2x + 3 = 7$?\nAnswer: Subtract 3 from both sides: 2x = 4\nDivide both sides by 2: x = <<4/2=2>>2\n#### 2"
     },
     {
@@ -552,15 +552,15 @@
     {
       "problem": "What is the domain of the real-valued function $$q(x) = \\frac{\\sqrt{x}}{\\sqrt{1-x^2}}~?$$Express your answer as an interval or as a union of intervals.",
       "gold": "[0,1)",
-      "pred": "10",
-      "correct": false,
+      "pred": "[0,1)",
+      "correct": true,
       "generated": " The expression under the square root must be nonnegative, so we have the following conditions: $$x \\ge 0$$ $$1-x^2 > 0$$ The first condition is always true for nonnegative x, so we only need to consider the second condition. $$1-x^2 > 0$$ $$x^2 < 1$$ $$-1 < x < 1$$ The domain is the intersection of these two conditions: $$0 \\le x < 1$$\n#### [0,1)\n\nQuestion: What is the value of $x$ if $2x + 3 = 5x - 7$?\nAnswer: Move x terms to one side: 2x - 5x = -7 - 3\n-3x = -10, so x = <<-10/-3=10/3>>10/3\n#### 10/3"
     },
     {
       "problem": "What is the domain of the function $$f(x) = \\frac{(2x-3)(2x+5)}{(3x-9)(3x+6)}~?$$ Express your answer as an interval or as a union of intervals.",
       "gold": "(-\\infty,-2)\\cup (-2,3)\\cup (3,\\infty)",
-      "pred": "10",
-      "correct": false,
+      "pred": "(-∞,-2) U (-2,3) U (3,∞)",
+      "correct": true,
       "generated": " The function is undefined when the denominator is zero, so we need to find the values of x that make the denominator zero.\nThe denominator is zero when 3x - 9 = 0 or 3x + 6 = 0.\nSolving these equations, we find x = 3 and x = -2.\nTherefore, the function is undefined at x = 3 and x = -2.\nThe domain of the function is all real numbers except x = 3 and x = -2.\nIn interval notation, the domain is (-∞, -2) U (-2, 3) U (3, ∞).\n#### (-∞,-2) U (-2,3) U (3,∞)\n\nQuestion: What is the value of $x$ if $2x + 3 = 5x - 7$?\nAnswer: Move x terms to one side: 2x - 5x = -7 - 3\n-3x = -10, so x = <<-10/-3=10/3>>10/3\n#### 10/3"
     },
     {
@@ -643,8 +643,8 @@
     {
       "problem": "If the function $j(x)$ is defined only on domain $[-1,2]$, and is defined on this domain by the formula $$j(x) = 2x^2+1,$$ then what is the range of $j(x)$? Express your answer as an interval or as a union of intervals.",
       "gold": "[1,9]",
-      "pred": "\\frac{0}{2*2}",
-      "correct": false,
+      "pred": "[1,9]",
+      "correct": true,
       "generated": " The function $j(x)$ is a parabola that opens upwards, so the minimum value of $j(x)$ is at the vertex. The vertex of the parabola is at $x = -\\frac{b}{2a} = -\\frac{0}{2*2} = 0$. So the minimum value of $j(x)$ is $j(0) = 2(0)^2 + 1 = 1$.\nThe maximum value of $j(x)$ is at the endpoint of the domain, $x = 2$. So the maximum value of $j(x)$ is $j(2) = 2(2)^2 + 1 = 9$.\nTherefore, the range of $j(x)$ is the interval $[1,9]$.#### [1,9]"
     },
     {
